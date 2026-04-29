@@ -1,0 +1,4057 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Beff's RNG</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&family=Audiowide&family=Cinzel:wght@400;700&family=Orbitron:wght@400;700&family=Playfair+Display:ital,wght@0,700;1,700&family=Permanent+Marker&family=Press+Start+2P&family=Rubik+Glitch&family=Monoton&family=Exo+2:wght@200;700&family=Raleway:wght@100;800&family=Faster+One&family=Creepster&family=Righteous&family=Bebas+Neue&family=Caveat:wght@700&family=Special+Elite&family=Russo+One&family=Oxanium:wght@300;700&family=Black+Ops+One&family=Major+Mono+Display&family=Silkscreen&family=VT323&family=Dela+Gothic+One&family=Bungee+Shade&family=Climate+Crisis&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:     #0d0e11;
+  --bg2:    #13151a;
+  --bg3:    #191c23;
+  --bg4:    #1e2129;
+  --border:        rgba(180,195,220,0.07);
+  --border-bright: rgba(180,195,220,0.14);
+  --border-accent: rgba(180,195,220,0.22);
+  --text:       #8a95a8;
+  --text-dim:   #3a404d;
+  --text-mid:   #5e6878;
+  --text-bright:#d6dde8;
+  --red:    #7eb8d4;
+  --red-dim: rgba(126,184,212,0.1);
+  --red-glow: rgba(126,184,212,0.2);
+  --gold:   #a8bfd4;
+  --gold-bright: #c8dae8;
+  --gold-dim: rgba(168,191,212,0.1);
+  --accent: rgba(180,195,220,0.03);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Mono', monospace;
+  min-height: 100vh;
+  overflow-x: hidden;
+  cursor: default;
+  letter-spacing: 0;
+}
+
+/* subtle grain + nullscapes void depth */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  pointer-events: none; z-index: 0;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+}
+
+/* faint horizontal scanlines for that void depth */
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  pointer-events: none; z-index: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 3px,
+    rgba(126,184,212,0.008) 3px,
+    rgba(126,184,212,0.008) 4px
+  );
+}
+
+/* stars hidden in minimal mode */
+#stars { display: none; }
+
+/* flash */
+#flash {
+  position: fixed; inset: 0; z-index: 999; pointer-events: none;
+  background: white; opacity: 0; transition: opacity 0.06s;
+}
+
+/* ── LAYOUT ── */
+#app {
+  position: relative; z-index: 1;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 6rem;
+}
+
+/* ── HEADER ── */
+header {
+  margin-bottom: 3rem;
+  padding-bottom: 2rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+.game-title {
+  font-family: 'Audiowide', sans-serif;
+  font-size: clamp(1.7rem, 4vw, 2.6rem);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  color: var(--text-bright);
+}
+.game-title span { color: var(--text-mid); font-weight: 400; }
+.game-subtitle {
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  font-weight: 400;
+}
+
+/* ── STAT BAR ── */
+.stat-bar {
+  display: flex;
+  gap: 0;
+  flex-wrap: wrap;
+  margin-bottom: 2rem;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+}
+.stat-chip {
+  padding: 0.65rem 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  border-right: 1px solid var(--border);
+  flex: 1;
+  min-width: 80px;
+}
+.stat-chip:last-child { border-right: none; }
+.stat-chip .label {
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.5rem;
+  font-weight: 500;
+}
+.stat-chip .val { color: var(--text-bright); font-size: 0.78rem; font-weight: 400; }
+.stat-chip .val.gold { color: var(--gold); }
+.stat-chip .val.luck { color: #7ecfb8; }
+
+/* ── MAIN GRID ── */
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+}
+@media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+
+/* ── CARDS ── */
+.card {
+  background: var(--bg2);
+  padding: 1.5rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.card-title {
+  font-family: 'Syne', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-bottom: 1.2rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── ROLL CARD ── */
+.roll-card {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  background: transparent;
+}
+.roll-display {
+  flex: 1;
+  text-align: center;
+  padding: 3rem 2rem;
+  position: relative;
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+}
+
+.aura-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 130px;
+  width: 100%;
+}
+#aura-canvas {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  pointer-events: none; opacity: 0.4;
+}
+.roll-aura-name {
+  font-family: 'Syne', sans-serif;
+  font-size: clamp(1.8rem, 4.5vw, 3.2rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  transition: all 0.25s;
+  min-height: 3.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative; z-index: 2;
+  color: var(--text-bright);
+}
+.roll-aura-name.animate {
+  animation: rollFlicker 0.12s steps(1) infinite;
+}
+.roll-aura-name.rare-font {
+  filter: drop-shadow(0 0 12px currentColor) drop-shadow(0 0 28px currentColor);
+  animation: epicPulse 2.5s ease-in-out infinite;
+}
+.roll-aura-name.transcendent-font {
+  filter: drop-shadow(0 0 20px currentColor) drop-shadow(0 0 50px currentColor);
+  animation: beyondPulse 2s ease-in-out infinite;
+}
+@keyframes epicPulse {
+  0%,100% { filter: drop-shadow(0 0 8px currentColor); }
+  50%      { filter: drop-shadow(0 0 18px currentColor) drop-shadow(0 0 36px currentColor); }
+}
+@keyframes beyondPulse {
+  0%,100% { letter-spacing: -0.02em; filter: drop-shadow(0 0 14px currentColor) drop-shadow(0 0 40px currentColor); }
+  50%      { letter-spacing: 0.04em;  filter: drop-shadow(0 0 26px currentColor) drop-shadow(0 0 70px currentColor); }
+}
+@keyframes rollFlicker {
+  0%   { opacity: 1; }
+  50%  { opacity: 0.15; }
+  100% { opacity: 1; }
+}
+
+.roll-tier-badge {
+  display: inline-block;
+  font-size: 0.52rem;
+  letter-spacing: 0.2em;
+  padding: 0.2rem 0.8rem;
+  border: 1px solid currentColor;
+  margin-top: 0.5rem;
+  opacity: 0.55;
+  font-weight: 500;
+  border-radius: 2px;
+}
+.roll-chance {
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  margin-top: 0.5rem;
+  letter-spacing: 0.06em;
+  font-weight: 300;
+}
+.gilded-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.58rem;
+  color: var(--gold-bright);
+  border: 1px solid rgba(212,168,83,0.3);
+  background: var(--gold-dim);
+  padding: 0.18rem 0.6rem;
+  margin-left: 0.4rem;
+  animation: gildedPulse 2.5s ease-in-out infinite;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  border-radius: 2px;
+}
+@keyframes gildedPulse {
+  0%,100% { box-shadow: 0 0 6px rgba(212,168,83,0.15); }
+  50%      { box-shadow: 0 0 18px rgba(212,168,83,0.35); }
+}
+
+/* ── ROLL ACTIONS SIDEBAR ── */
+.roll-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 140px;
+  background: var(--bg3);
+}
+.roll-actions .btn { border-radius: 0; border-left: none; border-right: none; border-top: none; }
+.roll-actions .divider { height: 1px; background: var(--border); }
+
+/* ── BUTTONS ── */
+.btn {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.62rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  padding: 0.85rem 1rem;
+  border-radius: 0;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-mid);
+  cursor: pointer;
+  transition: all 0.14s;
+  text-transform: uppercase;
+  position: relative;
+  overflow: hidden;
+}
+.btn:hover { background: var(--bg4); color: var(--text-bright); border-color: var(--border-accent); }
+.btn:active { opacity: 0.6; }
+
+.btn-primary {
+  background: var(--bg2);
+  border-color: rgba(126,184,212,0.2);
+  color: #9ec8e0;
+  font-family: 'Syne', sans-serif;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  padding: 1.2rem 1rem;
+}
+.btn-primary:hover {
+  background: rgba(126,184,212,0.05);
+  border-color: rgba(126,184,212,0.35);
+  color: #bde0f0;
+}
+
+.btn-gold {
+  border-color: rgba(212,168,83,0.22);
+  color: var(--gold);
+}
+.btn-gold:hover { border-color: rgba(212,168,83,0.4); color: var(--gold-bright); }
+
+.btn-sm {
+  font-size: 0.58rem;
+  padding: 0.65rem 0.8rem;
+  letter-spacing: 0.06em;
+}
+.btn-toggle {
+  border-color: var(--border);
+  color: var(--text-dim);
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+}
+.btn-toggle.active {
+  border-color: rgba(212,168,83,0.3);
+  color: var(--gold);
+  background: var(--gold-dim);
+}
+
+/* ── BUFF BAR ── */
+.buff-bar {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+}
+.buff-label-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+.buff-name { color: #9ec8e0; font-weight: 500; letter-spacing: 0.04em; }
+.buff-time { color: var(--text-dim); }
+.buff-track {
+  height: 1px;
+  background: rgba(255,255,255,0.05);
+  overflow: hidden;
+}
+.buff-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--red), #c8dae8);
+  transition: width 1s linear;
+}
+.no-buff { color: var(--text-dim); font-size: 0.6rem; font-weight: 300; }
+
+/* ── LOG ── */
+.log-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.log-list::-webkit-scrollbar { width: 1px; }
+.log-list::-webkit-scrollbar-track { background: transparent; }
+.log-list::-webkit-scrollbar-thumb { background: var(--border); }
+.log-item {
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  animation: logIn 0.15s ease-out;
+  font-weight: 300;
+}
+@keyframes logIn { from { opacity: 0; transform: translateX(-4px); } }
+.log-item::before { content: '/'; color: var(--text-dim); font-size: 0.5rem; opacity: 0.4; }
+.log-item.special { color: var(--text); font-weight: 500; }
+.log-item.special::before { content: '◆'; color: var(--gold); font-size: 0.45rem; opacity: 1; }
+
+/* ── POTIONS ── */
+.potion-grid { display: flex; flex-direction: column; gap: 1px; }
+.potion-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 0.8rem;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  transition: border-color 0.14s;
+}
+.potion-row:hover { border-color: var(--border-bright); }
+.potion-row.active-potion { border-color: rgba(126,184,212,0.3); background: var(--red-dim); }
+.potion-icon { font-size: 0.9rem; }
+.potion-info { flex: 1; }
+.potion-name { font-size: 0.65rem; color: var(--text-bright); font-weight: 500; }
+.potion-stats { font-size: 0.55rem; color: var(--text-dim); margin-top: 0.1rem; }
+.potion-count {
+  font-size: 0.6rem;
+  padding: 0.12rem 0.4rem;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  background: var(--bg);
+}
+.potion-count.has-potions { color: var(--gold); border-color: rgba(212,168,83,0.2); }
+
+/* ── INV TABS ── */
+.tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.tab {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.14em;
+  padding: 0.5rem 1rem 0.65rem;
+  border-radius: 0;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.14s;
+  font-weight: 500;
+  text-transform: uppercase;
+  position: relative;
+  bottom: -1px;
+}
+.tab:hover { color: var(--text); }
+.tab.active {
+  color: var(--text-bright);
+  border-bottom-color: var(--text-bright);
+}
+
+.inv-tier-group { margin-bottom: 1.25rem; }
+.inv-tier-label {
+  font-size: 0.52rem;
+  letter-spacing: 0.2em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+}
+.inv-tier-label::after {
+  content: '';
+  flex: 1; height: 1px;
+  background: var(--border);
+}
+.inv-aura-chips { display: flex; flex-wrap: wrap; gap: 2px; }
+.aura-chip {
+  font-size: 0.58rem;
+  padding: 0.18rem 0.55rem;
+  border: 1px solid currentColor;
+  opacity: 0.65;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  transition: opacity 0.12s;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  border-radius: 2px;
+}
+.aura-chip:hover { opacity: 1; }
+.aura-chip .chip-count { font-size: 0.48rem; opacity: 0.45; }
+
+/* ── BANK ── */
+.tier-coin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 1px;
+}
+.tier-coin-row {
+  padding: 0.7rem 0.8rem;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.tier-coin-label { font-size: 0.55rem; letter-spacing: 0.12em; color: var(--text-dim); text-transform: uppercase; }
+.tier-coin-rate { font-size: 0.62rem; color: var(--gold); }
+.tier-coin-sell {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.58rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.12s;
+  margin-top: 0.4rem;
+  letter-spacing: 0.06em;
+  font-weight: 400;
+  text-transform: uppercase;
+}
+.tier-coin-sell:hover { border-color: var(--gold-bright); color: var(--gold-bright); }
+.tier-coin-sell:disabled { opacity: 0.2; cursor: not-allowed; }
+
+/* ── SHOP ── */
+.shop-grid { display: flex; flex-direction: column; gap: 1px; }
+.shop-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0.8rem;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+}
+.shop-item-icon { font-size: 0.9rem; }
+.shop-item-info { flex: 1; }
+.shop-item-name { font-size: 0.65rem; color: var(--text-bright); font-weight: 500; }
+.shop-item-stats { font-size: 0.55rem; color: var(--text-dim); margin-top: 0.1rem; }
+.shop-item-cost {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.62rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid rgba(212,168,83,0.25);
+  background: transparent;
+  color: var(--gold);
+  cursor: pointer;
+  transition: all 0.12s;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+}
+.shop-item-cost:hover { background: var(--gold-dim); border-color: rgba(212,168,83,0.5); }
+.shop-item-cost:disabled { opacity: 0.2; cursor: not-allowed; background: transparent; }
+
+/* ── AUTO ROLL ── */
+.auto-options { display: flex; flex-wrap: wrap; gap: 1px; margin-bottom: 1rem; }
+.auto-opt {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.58rem;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.12s;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.auto-opt.selected { border-color: rgba(212,168,83,0.35); color: var(--gold); background: var(--gold-dim); }
+.auto-opt:hover { border-color: var(--border-bright); color: var(--text); }
+.auto-status {
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  padding: 0.6rem 0.8rem;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+}
+.auto-status .progress { color: #9ec8e0; font-weight: 500; }
+
+/* ── CRAFT ── */
+.craft-grid { display: flex; flex-direction: column; gap: 1px; }
+.craft-item {
+  padding: 0.9rem;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  transition: border-color 0.14s;
+}
+.craft-item.craftable { border-color: rgba(212,168,83,0.25); }
+.craft-item.owned { border-color: var(--border); }
+.craft-item.equipped { border-color: rgba(126,184,212,0.3); background: var(--red-dim); }
+.craft-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.6rem;
+}
+.craft-name { font-size: 0.68rem; color: var(--text-bright); font-weight: 500; letter-spacing: 0.04em; }
+.craft-desc { font-size: 0.55rem; color: var(--text-dim); }
+.craft-badge { font-size: 0.5rem; padding: 0.12rem 0.5rem; letter-spacing: 0.1em; font-weight: 500; border-radius: 2px; }
+.craft-badge.equipped-badge { background: var(--red-dim); color: #9ec8e0; border: 1px solid rgba(126,184,212,0.2); }
+.craft-badge.owned-badge { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
+
+.craft-mats { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 0.6rem; }
+.mat-chip {
+  font-size: 0.55rem;
+  padding: 0.12rem 0.45rem;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  border-radius: 2px;
+}
+.mat-chip.ok { border-color: rgba(212,168,83,0.3); color: var(--gold); }
+.mat-chip.missing { border-color: rgba(126,184,212,0.25); color: #9ec8e0; }
+
+/* ── NAV ── */
+.nav {
+  display: flex;
+  gap: 0;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  margin-bottom: 1px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0;
+}
+.nav-btn {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.58rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  padding: 0.65rem 1.2rem 0.8rem;
+  border-radius: 0;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.14s;
+  text-transform: uppercase;
+  white-space: nowrap;
+  position: relative;
+  bottom: -1px;
+}
+.nav-btn:hover { color: var(--text); }
+.nav-btn.active {
+  color: var(--text-bright);
+  border-bottom-color: var(--text-bright);
+}
+.nav-btn.btn-gold {
+  color: var(--gold);
+  margin-left: auto;
+}
+.nav-btn.btn-gold:hover { color: var(--gold-bright); }
+
+/* ── PANELS ── */
+.panel { display: none; }
+.panel.active { display: contents; }
+
+/* ── AURA DETAIL MODAL ── */
+.aura-modal-overlay {
+  position: fixed; inset: 0; z-index: 500;
+  background: rgba(0,0,0,0.85);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.22s;
+}
+.aura-modal-overlay.open { opacity: 1; pointer-events: all; }
+.aura-modal-box {
+  background: var(--bg2);
+  border: 1px solid var(--border-accent);
+  max-width: 480px;
+  width: 92%;
+  position: relative;
+  overflow: hidden;
+}
+.aura-modal-stage {
+  position: relative;
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+#aura-modal-canvas {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+}
+.aura-modal-name {
+  font-family: 'Syne', sans-serif;
+  font-size: clamp(1.4rem, 5vw, 2.4rem);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  text-align: center;
+  position: relative; z-index: 2;
+  transition: all 0.2s;
+}
+.aura-modal-name.rare-font {
+  filter: drop-shadow(0 0 12px currentColor) drop-shadow(0 0 28px currentColor);
+  animation: epicPulse 2.5s ease-in-out infinite;
+}
+.aura-modal-name.transcendent-font {
+  filter: drop-shadow(0 0 20px currentColor) drop-shadow(0 0 50px currentColor);
+  animation: beyondPulse 2s ease-in-out infinite;
+}
+.aura-modal-name.animate {
+  animation: rollFlicker 0.12s steps(1) infinite;
+}
+.aura-modal-body {
+  padding: 1.25rem 1.5rem 1.5rem;
+  border-top: 1px solid var(--border);
+}
+.aura-modal-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.aura-modal-tier {
+  font-size: 0.52rem;
+  letter-spacing: 0.18em;
+  font-weight: 600;
+  padding: 0.18rem 0.65rem;
+  border: 1px solid currentColor;
+  opacity: 0.75;
+  font-family: 'Syne', sans-serif;
+  text-transform: uppercase;
+}
+.aura-modal-chance {
+  font-size: 0.58rem;
+  color: var(--text-dim);
+  letter-spacing: 0.06em;
+}
+.aura-modal-count {
+  font-size: 0.55rem;
+  color: var(--text-dim);
+  margin-left: auto;
+  letter-spacing: 0.06em;
+}
+.aura-modal-gilded {
+  font-size: 0.5rem;
+  color: var(--gold-bright);
+  border: 1px solid rgba(212,168,83,0.3);
+  background: var(--gold-dim);
+  padding: 0.15rem 0.55rem;
+  letter-spacing: 0.08em;
+  font-weight: 500;
+}
+.aura-modal-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.aura-modal-close {
+  margin-left: auto;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.55rem;
+  letter-spacing: 0.1em;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: all 0.12s;
+}
+.aura-modal-close:hover { border-color: var(--border-bright); color: var(--text-bright); }
+.aura-modal-replay {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.55rem;
+  letter-spacing: 0.1em;
+  padding: 0.5rem 1rem;
+  border: 1px solid rgba(126,184,212,0.25);
+  background: transparent;
+  color: #9ec8e0;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: all 0.12s;
+}
+.aura-modal-replay:hover { background: var(--red-dim); border-color: rgba(126,184,212,0.45); }
+.col-card.discovered { cursor: pointer; }
+
+/* ── ROLL CUTSCENE ── */
+#cutscene {
+  position: fixed; inset: 0; z-index: 800;
+  pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0;
+}
+#cutscene.active { pointer-events: all; }
+#cutscene-bg {
+  position: absolute; inset: 0;
+  background: #000;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+#cutscene-vignette {
+  position: absolute; inset: 0;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+#cutscene-fog {
+  position: absolute; inset: 0;
+  opacity: 0;
+  transition: opacity 1s ease;
+}
+#cutscene-canvas {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+}
+#cutscene-name-wrap {
+  position: relative; z-index: 2;
+  text-align: center;
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+#cutscene-name {
+  font-family: 'Syne', sans-serif;
+  font-size: clamp(2rem, 6vw, 4rem);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  color: #fff;
+  text-shadow: 0 0 40px currentColor;
+}
+#cutscene-name.rare-font {
+  filter: drop-shadow(0 0 16px currentColor) drop-shadow(0 0 40px currentColor);
+  animation: epicPulse 2.5s ease-in-out infinite;
+}
+#cutscene-name.transcendent-font {
+  filter: drop-shadow(0 0 24px currentColor) drop-shadow(0 0 70px currentColor);
+  animation: beyondPulse 2s ease-in-out infinite;
+}
+#cutscene-tier {
+  font-family: 'Syne', sans-serif;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  margin-top: 0.6rem;
+  opacity: 0.8;
+}
+#cutscene-chance {
+  font-size: 0.6rem;
+  color: rgba(255,255,255,0.4);
+  letter-spacing: 0.1em;
+  margin-top: 0.3rem;
+}
+
+/* ── RESET MODAL ── */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 500;
+  background: rgba(0,0,0,0.7);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.2s;
+}
+.modal-overlay.open { opacity: 1; pointer-events: all; }
+.modal-box {
+  background: var(--bg2);
+  border: 1px solid rgba(239,68,68,0.3);
+  padding: 2rem 2.5rem;
+  max-width: 380px;
+  width: 90%;
+  position: relative;
+  box-shadow: 0 0 60px rgba(239,68,68,0.08);
+}
+.modal-title {
+  font-family: 'Syne', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #ef4444;
+  margin-bottom: 0.75rem;
+}
+.modal-body {
+  font-size: 0.65rem;
+  color: var(--text);
+  line-height: 1.7;
+  margin-bottom: 0.5rem;
+}
+.modal-body strong { color: var(--text-bright); }
+.modal-warning {
+  font-size: 0.58rem;
+  color: #ef4444;
+  margin-bottom: 1.5rem;
+  letter-spacing: 0.04em;
+  opacity: 0.8;
+}
+.modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
+
+/* ── SHOP STOCK ── */
+.shop-stock-badge {
+  font-size: 0.5rem;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  background: var(--bg);
+  letter-spacing: 0.06em;
+  font-weight: 500;
+  margin-right: 0.4rem;
+  flex-shrink: 0;
+}
+.shop-stock-badge.in-stock { border-color: rgba(52,211,153,0.3); color: #34d399; }
+.shop-stock-badge.low-stock { border-color: rgba(251,191,36,0.3); color: #fbbf24; }
+.shop-stock-badge.out-stock { border-color: rgba(239,68,68,0.25); color: #ef4444; }
+.shop-restock-row {
+  padding: 0.55rem 0.8rem;
+  font-size: 0.55rem;
+  color: var(--text-dim);
+  letter-spacing: 0.06em;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+.shop-restock-timer { color: #7ecfb8; font-weight: 500; }
+
+/* ── TOAST ── */
+#toast {
+  position: fixed;
+  bottom: 2rem; left: 50%;
+  transform: translateX(-50%) translateY(12px);
+  background: var(--bg3);
+  border: 1px solid var(--border-bright);
+  padding: 0.6rem 1.4rem;
+  font-size: 0.62rem;
+  color: var(--text-bright);
+  opacity: 0;
+  transition: all 0.2s;
+  pointer-events: none;
+  z-index: 100;
+  white-space: nowrap;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ── COLLECTION ── */
+.collection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.collection-progress { font-size: 0.6rem; color: var(--text-dim); }
+.collection-progress .prog-val { color: var(--text-bright); font-weight: 500; }
+.collection-progress-bar {
+  height: 1px;
+  background: rgba(255,255,255,0.04);
+  margin-top: 0.4rem;
+  overflow: hidden;
+}
+.collection-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--red), var(--gold));
+  transition: width 0.4s ease;
+}
+.collection-tier-group { margin-bottom: 1.25rem; }
+.collection-tier-label {
+  font-size: 0.5rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  margin-bottom: 0.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+.collection-tier-label .tier-found {
+  font-size: 0.48rem;
+  color: var(--text-dim);
+  margin-left: auto;
+  font-weight: 300;
+}
+.collection-tier-label::after {
+  content: '';
+  flex: 1; height: 1px;
+  background: var(--border);
+  max-width: 48px;
+}
+.collection-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 1px;
+}
+.col-card {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  transition: all 0.12s;
+  position: relative;
+  overflow: hidden;
+}
+.col-card.discovered { border-color: currentColor; opacity: 0.75; }
+.col-card.discovered:hover { opacity: 1; }
+.col-card.undiscovered { border-color: var(--border); opacity: 0.2; filter: grayscale(1); }
+.col-card-name {
+  font-size: 0.62rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  font-family: 'DM Mono', monospace;
+}
+.col-card-info {
+  font-size: 0.5rem;
+  color: var(--text-dim);
+  display: flex;
+  justify-content: space-between;
+}
+
+/* ── TRANSCENDENT CARDS ── */
+.col-card.transcendent-card {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.7rem 1rem;
+}
+.col-card.transcendent-card::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.02) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: shimmer 4s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.col-card.transcendent-card .col-card-name {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  flex: 1;
+  filter: drop-shadow(0 0 5px currentColor);
+}
+.col-card.transcendent-card .col-card-info {
+  flex-direction: row;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 0.5rem;
+}
+.col-card.transcendent-card .col-rarity-full {
+  font-size: 0.52rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.col-card-count { font-size: 0.5rem; opacity: 0.45; }
+.col-card-new {
+  position: absolute;
+  top: 3px; right: 4px;
+  font-size: 0.4rem;
+  color: var(--gold);
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.col-gilded-dot {
+  display: inline-block;
+  width: 4px; height: 4px;
+  background: var(--gold);
+  margin-left: 3px;
+  vertical-align: middle;
+  box-shadow: 0 0 4px var(--gold);
+  transform: rotate(45deg);
+}
+.collection-filter-bar { display: flex; gap: 1px; flex-wrap: wrap; margin-bottom: 1rem; }
+.col-filter-btn {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.52rem;
+  letter-spacing: 0.1em;
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.12s;
+  text-transform: uppercase;
+  font-weight: 400;
+}
+.col-filter-btn.active {
+  background: var(--bg4);
+  border-color: var(--border-bright);
+  color: var(--text-bright);
+}
+
+
+/* ── AURA STAR ── */
+.aura-star {
+  display: inline-block;
+  font-style: normal;
+  font-size: 0.7em;
+  line-height: 1;
+  margin-left: 0.25em;
+  vertical-align: middle;
+  animation: starPulse 2s ease-in-out infinite;
+  filter: drop-shadow(0 0 4px currentColor);
+}
+.roll-aura-name .aura-star {
+  font-size: 0.55em;
+  animation: starPulse 1.5s ease-in-out infinite;
+  filter: drop-shadow(0 0 6px currentColor) drop-shadow(0 0 14px currentColor);
+}
+@keyframes starPulse {
+  0%, 100% { opacity: 0.7; transform: scale(0.9); }
+  50%       { opacity: 1;   transform: scale(1.1); }
+}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar { width: 2px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-bright); }
+
+/* ── TESTER MODE ── */
+#tester-btn {
+  position: fixed;
+  bottom: 1rem; right: 1rem;
+  z-index: 200;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.5rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid rgba(255,255,255,0.05);
+  background: transparent;
+  color: rgba(255,255,255,0.1);
+  cursor: pointer;
+  transition: all 0.3s;
+  text-transform: uppercase;
+}
+#tester-btn:hover { color: rgba(255,255,255,0.35); border-color: rgba(255,255,255,0.12); }
+#tester-btn.tester-on {
+  border-color: rgba(180,195,220,0.4);
+  background: rgba(180,195,220,0.05);
+  color: #a0b8d0;
+  box-shadow: 0 0 10px rgba(180,195,220,0.12);
+  animation: testerPulse 2s ease-in-out infinite;
+}
+@keyframes testerPulse {
+  0%,100% { box-shadow: 0 0 6px rgba(180,195,220,0.08); }
+  50%      { box-shadow: 0 0 18px rgba(180,195,220,0.25); }
+}
+.tester-banner {
+  display: none;
+  text-align: center;
+  font-size: 0.55rem;
+  letter-spacing: 0.2em;
+  color: #a0b8d0;
+  padding: 0.35rem;
+  background: rgba(255,0,180,0.04);
+  border-bottom: 1px solid rgba(180,195,220,0.1);
+  margin-bottom: 1rem;
+  text-transform: uppercase;
+  animation: testerPulse 2s ease-in-out infinite;
+  font-weight: 500;
+}
+body.tester-active .tester-banner { display: block; }
+
+/* ── TESTER BIOME BAR ── */
+.tester-biome-bar {
+  display: none;
+  gap: 2px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 0.5rem 0.8rem;
+  background: rgba(180,195,220,0.02);
+  border: 1px solid rgba(180,195,220,0.07);
+  margin-bottom: 1rem;
+}
+body.tester-active .tester-biome-bar { display: flex; }
+.tester-biome-label {
+  font-size: 0.52rem;
+  color: #a0b8d0;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  margin-right: 0.25rem;
+  flex-shrink: 0;
+  font-weight: 500;
+}
+.tester-biome-btn {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.58rem;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.12s;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.tester-biome-btn:hover { border-color: var(--border-bright); color: var(--text); }
+.tester-biome-btn.active { border-color: rgba(180,195,220,0.3); color: #a0b8d0; background: rgba(180,195,220,0.04); }
+.tester-biome-btn.clear-btn { border-color: rgba(126,184,212,0.25); color: #9ec8e0; }
+.tester-biome-btn.clear-btn:hover { background: var(--red-dim); } 
+
+/* ── BIOME ── */
+.biome-bar { border-color: rgba(74,222,128,0.2) !important; }
+.biome-fill { background: linear-gradient(90deg, #16a34a, #67e8f9) !important; }
+.biome-boosted-row {
+  font-size: 0.55rem;
+  color: #7ecfb8;
+  margin-top: 0.35rem;
+  letter-spacing: 0.04em;
+  opacity: 0.8;
+}
+#biome-overlay { transition: opacity 2s, background 2s; }
+body.biome-active #app { animation: biomePulse 4s ease-in-out infinite; }
+@keyframes biomePulse {
+  0%,100% { filter: none; }
+  50% { filter: brightness(1.02); }
+}
+
+/* ── SETTINGS PANEL ── */
+.settings-section { margin-bottom: 1.8rem; }
+.settings-section-title {
+  font-family: 'Syne', sans-serif;
+  font-size: 0.58rem; font-weight: 600;
+  letter-spacing: 0.18em; color: var(--text-dim);
+  text-transform: uppercase;
+  margin-bottom: 0.75rem; padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.settings-section-title::before {
+  content: ''; display: inline-block;
+  width: 3px; height: 3px; background: var(--text-dim);
+  border-radius: 50%; flex-shrink: 0;
+}
+.settings-row {
+  display: flex; align-items: flex-start;
+  justify-content: space-between;
+  padding: 0.65rem 0; border-bottom: 1px solid var(--border);
+  gap: 1rem; flex-wrap: wrap;
+}
+.settings-row:last-child { border-bottom: none; }
+.settings-row-info { flex: 1; min-width: 0; }
+.settings-row-label { font-size: 0.65rem; color: var(--text-bright); font-weight: 500; letter-spacing: 0.02em; }
+.settings-row-desc { font-size: 0.55rem; color: var(--text-dim); margin-top: 0.15rem; font-weight: 300; line-height: 1.5; }
+.settings-control { flex-shrink: 0; display: flex; align-items: center; }
+/* toggle */
+.toggle-wrap { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none; }
+.toggle-track {
+  width: 32px; height: 16px; background: var(--bg4);
+  border: 1px solid var(--border-bright); border-radius: 8px;
+  position: relative; transition: background 0.15s, border-color 0.15s; flex-shrink: 0;
+}
+.toggle-track.on { background: rgba(126,184,212,0.18); border-color: rgba(126,184,212,0.4); }
+.toggle-thumb {
+  position: absolute; top: 2px; left: 2px;
+  width: 10px; height: 10px; background: var(--text-dim);
+  border-radius: 50%; transition: transform 0.15s, background 0.15s;
+}
+.toggle-track.on .toggle-thumb { transform: translateX(16px); background: #9ec8e0; }
+.toggle-label { font-size: 0.58rem; color: var(--text-dim); letter-spacing: 0.06em; min-width: 2rem; }
+.toggle-track.on + .toggle-label { color: #9ec8e0; }
+/* select */
+.settings-select {
+  font-family: 'DM Mono', monospace; font-size: 0.6rem;
+  letter-spacing: 0.06em; padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border-bright); background: var(--bg3);
+  color: var(--text-bright); cursor: pointer; outline: none; border-radius: 0;
+  transition: border-color 0.12s;
+}
+.settings-select:hover, .settings-select:focus { border-color: var(--border-accent); }
+.settings-select option { background: #1e2129; }
+/* log filter chips */
+.log-filter-chips { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 0.5rem; }
+.log-chip {
+  font-family: 'DM Mono', monospace; font-size: 0.52rem;
+  padding: 0.15rem 0.5rem; border: 1px solid var(--border);
+  background: transparent; color: var(--text-dim); cursor: pointer;
+  letter-spacing: 0.06em; text-transform: uppercase; transition: all 0.12s; border-radius: 2px;
+}
+.log-chip.active { border-color: rgba(126,184,212,0.35); color: #9ec8e0; background: rgba(126,184,212,0.06); }
+/* auto-pot rows */
+.auto-pot-grid { display: flex; flex-direction: column; gap: 1px; margin-top: 0.5rem; }
+.auto-pot-row {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.5rem 0.6rem; background: var(--bg3); border: 1px solid var(--border);
+}
+.auto-pot-icon { font-size: 0.85rem; flex-shrink: 0; }
+.auto-pot-info { flex: 1; }
+.auto-pot-name { font-size: 0.6rem; color: var(--text-bright); }
+.auto-pot-desc { font-size: 0.52rem; color: var(--text-dim); margin-top: 0.1rem; }
+.auto-opt-btns { display: flex; gap: 1px; }
+.auto-speed-chip {
+  font-family: 'DM Mono', monospace; font-size: 0.55rem;
+  padding: 0.25rem 0.7rem; border: 1px solid var(--border);
+  background: transparent; color: var(--text-dim); cursor: pointer;
+  letter-spacing: 0.06em; transition: all 0.12s; border-radius: 0;
+}
+.auto-speed-chip.active { border-color: rgba(212,168,83,0.35); color: var(--gold); background: var(--gold-dim); }
+.auto-speed-chip:hover { border-color: var(--border-bright); color: var(--text); }
+</style>
+</head>
+<body>
+
+<div id="stars"></div>
+<div id="flash"></div>
+<div id="toast"></div>
+
+<button id="tester-btn" onclick="toggleTester()" title="Tester Mode">⬡ DEV</button>
+
+<div id="app">
+  <header>
+    <div class="game-title">BEFF'S <span>RNG</span></div>
+    <div class="game-subtitle">Aura Rolling Simulator &nbsp;·&nbsp; v2</div>
+  </header>
+  <div class="tester-banner">⚡ TESTER MODE ACTIVE — 10,000,000× Luck · Preserved Rarities · Instant Rolls · All Auras Unlocked ⚡</div>
+  <div class="tester-biome-bar" id="tester-biome-bar">
+    <span class="tester-biome-label">⬡ Biome</span>
+  </div>
+
+  <!-- STAT BAR -->
+  <div class="stat-bar">
+    <div class="stat-chip"><span class="label">Rolls</span><span class="val" id="stat-rolls">0</span></div>
+    <div class="stat-chip"><span class="label">Luck</span><span class="val luck" id="stat-luck">1x</span></div>
+    <div class="stat-chip"><span class="label">Cooldown</span><span class="val" id="stat-speed">0.8s</span></div>
+    <div class="stat-chip"><span class="label">Coins</span><span class="val gold" id="stat-coins">0</span></div>
+    <div class="stat-chip"><span class="label">Found</span><span class="val" id="stat-found">0/68</span></div>
+    <div class="stat-chip"><span class="label">Glove</span><span class="val" id="stat-glove">none</span></div>
+    <div class="stat-chip"><span class="label">Rarest</span><span class="val" id="stat-rarest">—</span></div>
+    <div class="stat-chip"><span class="label">Biome</span><span class="val" id="stat-biome" style="color:#7ecfb8">none</span></div>
+  </div>
+
+  <!-- NAV -->
+  <div class="nav">
+    <button class="nav-btn active" onclick="setPanel('roll')">Roll</button>
+    <button class="nav-btn" onclick="setPanel('inv')">Inventory</button>
+    <button class="nav-btn" onclick="setPanel('collect')">Collection</button>
+    <button class="nav-btn" onclick="setPanel('craft')">Craft</button>
+    <button class="nav-btn" onclick="setPanel('bank')">Bank</button>
+    <button class="nav-btn" onclick="setPanel('settings')">Settings</button>
+    <button class="nav-btn btn-gold" onclick="saveGame()">Save</button>
+  </div>
+
+  <!-- ─── ROLL PANEL ─── -->
+  <div id="panel-roll" class="panel active">
+    <div class="grid">
+      <!-- Roll display -->
+      <div class="card roll-card">
+        <div class="roll-display">
+          <div class="aura-stage" id="aura-stage">
+            <canvas id="aura-canvas"></canvas>
+            <div class="roll-aura-name" id="roll-name" style="color:var(--text-dim)">???</div>
+          </div>
+          <div id="roll-tier-row" style="margin-top:0.5rem; min-height:1.5rem"></div>
+          <div class="roll-chance" id="roll-chance">press Roll to begin</div>
+        </div>
+        <div class="roll-actions">
+          <button class="btn btn-primary" onclick="doRoll()" id="roll-btn">⟳ ROLL</button>
+          <button class="btn btn-toggle" id="quick-btn" onclick="toggleQuick()">⚡ Quick: OFF</button>
+          <div class="divider"></div>
+          <button class="btn btn-sm" onclick="usePot('m')" title="Use Minor Luck">🧪 Minor</button>
+          <button class="btn btn-sm" onclick="usePot('j')" title="Use Major Luck">⚗️ Major</button>
+          <button class="btn btn-sm" onclick="usePot('g')" title="Use Grand Luck">✨ Grand</button>
+          <div class="divider"></div>
+          <button class="btn btn-sm" onclick="usePot('sm')" title="Use Minor Haste">⚡ Haste I</button>
+          <button class="btn btn-sm" onclick="usePot('sj')" title="Use Major Haste">🌀 Haste II</button>
+          <button class="btn btn-sm" onclick="usePot('sg')" title="Use Grand Haste">💨 Haste III</button>
+        </div>
+      </div>
+
+      <!-- Buff + Log -->
+      <div class="card">
+        <div class="card-title">Active Buff</div>
+        <div id="buff-display" class="no-buff">No luck potion active</div>
+        <div id="buff-bar-wrap" class="buff-bar" style="display:none">
+          <div class="buff-label-row">
+            <span class="buff-name" id="buff-name"></span>
+            <span class="buff-time" id="buff-time"></span>
+          </div>
+          <div class="buff-track"><div class="buff-fill" id="buff-fill" style="width:100%"></div></div>
+        </div>
+
+        <div class="card-title" style="margin-top:1rem">Active Haste</div>
+        <div id="speed-display" class="no-buff">No haste potion active</div>
+        <div id="speed-bar-wrap" class="buff-bar" style="display:none">
+          <div class="buff-label-row">
+            <span class="buff-name" id="speed-buff-name"></span>
+            <span class="buff-time" id="speed-buff-time"></span>
+          </div>
+          <div class="buff-track"><div class="buff-fill" id="speed-buff-fill" style="width:100%;background:linear-gradient(90deg,#34d399,#67e8f9)"></div></div>
+        </div>
+
+        <div class="card-title" style="margin-top:1rem">Active Biome</div>
+        <div id="biome-display" class="no-buff">No biome active</div>
+        <div id="biome-bar-wrap" class="buff-bar biome-bar" style="display:none">
+          <div class="buff-label-row">
+            <span class="buff-name" id="biome-name"></span>
+            <span class="buff-time" id="biome-time"></span>
+          </div>
+          <div class="buff-track"><div class="buff-fill biome-fill" id="biome-fill" style="width:100%"></div></div>
+          <div class="biome-boosted-row" id="biome-boosted"></div>
+        </div>
+
+        <div class="card-title" style="margin-top:1rem">Log</div>
+        <ul class="log-list" id="log-list"></ul>
+      </div>
+
+      <!-- Potions -->
+      <div class="card">
+        <div class="card-title">Potions</div>
+        <div class="potion-grid" id="potion-grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── INVENTORY PANEL ─── -->
+  <div id="panel-inv" class="panel">
+    <div class="grid">
+      <div class="card" style="grid-column:1/-1">
+        <div class="tabs">
+          <button class="tab active" onclick="setInvTab('auras')">Auras</button>
+          <button class="tab" onclick="setInvTab('potions')">Potions</button>
+        </div>
+        <div id="inv-auras"></div>
+        <div id="inv-potions" style="display:none"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── COLLECTION PANEL ─── -->
+  <div id="panel-collect" class="panel">
+    <div class="grid">
+      <div class="card" style="grid-column:1/-1">
+        <div class="card-title">Aura Collection</div>
+        <div class="collection-header">
+          <div class="collection-progress">
+            <span>Discovered: </span><span class="prog-val" id="col-found">0</span><span> / </span><span class="prog-val" id="col-total">0</span>
+          </div>
+          <div class="collection-filter-bar" id="col-filters"></div>
+        </div>
+        <div class="collection-progress-bar"><div class="collection-progress-fill" id="col-bar" style="width:0%"></div></div>
+        <div style="height:1rem"></div>
+        <div id="col-content"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── CRAFT PANEL ─── -->
+  <div id="panel-craft" class="panel">
+    <div class="grid">
+      <div class="card" style="grid-column:1/-1">
+        <div class="card-title">Crafting — Gloves</div>
+        <div class="craft-grid" id="craft-grid"></div>
+        <div style="margin-top:0.75rem">
+          <button class="btn btn-sm" onclick="unequipGlove()">Unequip Glove</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── BANK PANEL ─── -->
+  <div id="panel-bank" class="panel">
+    <div class="grid">
+      <div class="card">
+        <div class="card-title">Gilded Coin Rewards</div>
+        <div class="tier-coin-grid" id="tier-coin-grid"></div>
+        <div style="font-size:0.62rem; color:var(--text-dim); margin-top:0.5rem">
+          A Gilded is a rare bonus variant of any rolled aura. The chance is listed per-aura.
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Shop — Buy Potions</div>
+        <div class="shop-grid" id="shop-grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── SETTINGS PANEL ─── -->
+  <div id="panel-settings" class="panel">
+    <div class="grid">
+
+      <!-- Left col: Automation -->
+      <div class="card">
+
+        <!-- AUTO ROLL -->
+        <div class="settings-section">
+          <div class="settings-section-title">Auto Roll</div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">Auto Roll</div>
+              <div class="settings-row-desc">Automatically rolls on cooldown. Base 0.8s, reduced by gloves and Haste potions.</div>
+            </div>
+            <div class="settings-control">
+              <div class="toggle-wrap" onclick="toggleAutoRoll()">
+                <div class="toggle-track" id="auto-roll-toggle"><div class="toggle-thumb"></div></div>
+                <span class="toggle-label" id="auto-roll-toggle-label">OFF</span>
+              </div>
+            </div>
+          </div>
+          <div class="auto-status" id="auto-status" style="margin-top:0.5rem;font-size:0.58rem;color:var(--text-dim)">Auto-roll: off</div>
+        </div>
+
+        <!-- AUTO POTION -->
+        <div class="settings-section">
+          <div class="settings-section-title">Auto Potion</div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">Auto-use Luck Potion</div>
+              <div class="settings-row-desc">Automatically uses your best available luck potion when none is active.</div>
+            </div>
+            <div class="settings-control">
+              <div class="toggle-wrap" onclick="toggleSetting('autoUseLuck')">
+                <div class="toggle-track" id="tog-autoUseLuck"><div class="toggle-thumb"></div></div>
+                <span class="toggle-label" id="togl-autoUseLuck">OFF</span>
+              </div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">Auto-use Haste Potion</div>
+              <div class="settings-row-desc">Automatically uses your best available haste potion when none is active.</div>
+            </div>
+            <div class="settings-control">
+              <div class="toggle-wrap" onclick="toggleSetting('autoUseHaste')">
+                <div class="toggle-track" id="tog-autoUseHaste"><div class="toggle-thumb"></div></div>
+                <span class="toggle-label" id="togl-autoUseHaste">OFF</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AUTO BUY -->
+        <div class="settings-section">
+          <div class="settings-section-title">Auto Buy</div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">Auto-buy Potions</div>
+              <div class="settings-row-desc">Automatically buys potions from the shop when your stock runs out, if you have enough coins.</div>
+            </div>
+            <div class="settings-control">
+              <div class="toggle-wrap" onclick="toggleSetting('autoBuyPotions')">
+                <div class="toggle-track" id="tog-autoBuyPotions"><div class="toggle-thumb"></div></div>
+                <span class="toggle-label" id="togl-autoBuyPotions">OFF</span>
+              </div>
+            </div>
+          </div>
+          <div id="auto-buy-detail" style="display:none">
+            <div class="auto-pot-grid" id="auto-buy-grid"></div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Right col: Log + Display -->
+      <div class="card">
+
+        <!-- LOG FILTERS -->
+        <div class="settings-section">
+          <div class="settings-section-title">Log Filter</div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">Show in Roll Log</div>
+              <div class="settings-row-desc">Choose which roll events appear in the log on the Roll panel.</div>
+              <div class="log-filter-chips" id="log-filter-chips"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- DISPLAY -->
+        <div class="settings-section">
+          <div class="settings-section-title">Display</div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">Quick Roll (skip animation)</div>
+              <div class="settings-row-desc">Skip the slot-machine animation and roll instantly.</div>
+            </div>
+            <div class="settings-control">
+              <div class="toggle-wrap" onclick="toggleQuickFromSettings()">
+                <div class="toggle-track" id="tog-quickRoll"><div class="toggle-thumb"></div></div>
+                <span class="toggle-label" id="togl-quickRoll">OFF</span>
+              </div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">Flash on Rare</div>
+              <div class="settings-row-desc">Screen flashes when you roll a Legendary or Gilded aura.</div>
+            </div>
+            <div class="settings-control">
+              <div class="toggle-wrap" onclick="toggleSetting('flashOnRare')">
+                <div class="toggle-track" id="tog-flashOnRare"><div class="toggle-thumb"></div></div>
+                <span class="toggle-label" id="togl-flashOnRare">OFF</span>
+              </div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">Aura Particle FX</div>
+              <div class="settings-row-desc">Show particle animations for rare auras (Unique and above).</div>
+            </div>
+            <div class="settings-control">
+              <div class="toggle-wrap" onclick="toggleSetting('particleFX')">
+                <div class="toggle-track" id="tog-particleFX"><div class="toggle-thumb"></div></div>
+                <span class="toggle-label" id="togl-particleFX">OFF</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- DANGER -->
+        <div class="settings-section">
+          <div class="settings-section-title">Data</div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">Save Game</div>
+              <div class="settings-row-desc">Manually save progress to local storage.</div>
+            </div>
+            <div class="settings-control">
+              <button class="btn btn-sm btn-gold" onclick="saveGame()">Save</button>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">Reset Game</div>
+              <div class="settings-row-desc">Wipes all progress. Cannot be undone.</div>
+            </div>
+            <div class="settings-control">
+              <button class="btn btn-sm" style="border-color:rgba(239,68,68,0.3);color:#ef4444" onclick="resetGame()">Reset</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</div><!-- /app -->
+
+<div id="cutscene">
+  <div id="cutscene-bg"></div>
+  <div id="cutscene-vignette"></div>
+  <div id="cutscene-fog"></div>
+  <canvas id="cutscene-canvas"></canvas>
+  <div id="cutscene-name-wrap">
+    <div id="cutscene-name"></div>
+    <div id="cutscene-tier"></div>
+    <div id="cutscene-chance"></div>
+  </div>
+</div>
+
+<!-- ── AURA DETAIL MODAL ── -->
+<div class="aura-modal-overlay" id="aura-modal">
+  <div class="aura-modal-box">
+    <div class="aura-modal-stage" id="aura-modal-stage">
+      <canvas id="aura-modal-canvas"></canvas>
+      <div class="aura-modal-name" id="aura-modal-name">—</div>
+    </div>
+    <div class="aura-modal-body">
+      <div class="aura-modal-meta">
+        <span class="aura-modal-tier" id="aura-modal-tier"></span>
+        <span class="aura-modal-chance" id="aura-modal-chance"></span>
+        <span id="aura-modal-gilded" class="aura-modal-gilded" style="display:none">✦ GILDED POSSIBLE</span>
+        <span class="aura-modal-count" id="aura-modal-count"></span>
+      </div>
+      <div class="aura-modal-actions">
+        <button class="aura-modal-replay" id="aura-modal-replay-btn" onclick="replayAuraModal()" style="display:none">⟳ Replay</button>
+        <button class="aura-modal-close" onclick="closeAuraModal()">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── RESET CONFIRMATION MODAL ── -->
+<div class="modal-overlay" id="reset-modal">
+  <div class="modal-box">
+    <div class="modal-title">⚠ Reset All Progress?</div>
+    <div class="modal-body">
+      This will permanently delete <strong>all auras, coins, potions, crafted gloves</strong>, and your entire roll history.<br><br>
+      This action <strong>cannot be undone</strong>.
+    </div>
+    <div class="modal-warning">Are you absolutely sure you want to start over?</div>
+    <div class="modal-actions">
+      <button class="btn btn-sm" onclick="closeResetModal()">Cancel</button>
+      <button class="btn btn-sm" style="border-color:rgba(239,68,68,0.5);color:#ef4444;background:rgba(239,68,68,0.06)" onclick="confirmReset()">Yes, Reset Everything</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── DATA ──────────────────────────────────────────────────────────────────────
+const AURAS = [
+  // ── TRANSCENDENT (1 in 1,000,000,000+) ───────────────────────────────────
+  ["TRANSCENDENT", "THE LAST LIGHT",  1/5000000000, "#fff8e1", 0.99],
+  ["TRANSCENDENT", "ZERO POINT",      1/3000000000, "#e8f4fd", 0.97],
+  ["TRANSCENDENT", "GODSLAYER",       1/2000000000, "#ff4444", 0.95],
+  ["TRANSCENDENT", "ETERNITY",        1/1500000000, "#ffd6a5", 0.93],
+  ["TRANSCENDENT", "AXIOM",           1/1200000000, "#b5ead7", 0.91],
+  ["TRANSCENDENT", "PANTHEON",        1/1000000000, "#ffb3c6", 0.89],
+  // ── GLORIOUS (1 in 99,999,999 – 1 in 999,999,999) ────────────────────────
+  ["GLORIOUS",  "STARBORN",       1/700000000, "#a78bfa", 0.85],
+  ["GLORIOUS",  "ASCENDANT",      1/450000000, "#d946ef", 0.83],
+  ["GLORIOUS",  "ANCIENT ONE",    1/280000000, "#f4f4f5", 0.81],
+  ["GLORIOUS",  "SOLFLARE",       1/180000000, "#fbbf24", 0.79],
+  ["GLORIOUS",  "CELESTIAL",      1/120000000, "#67e8f9", 0.77],
+  ["GLORIOUS",  "GILDED THRONE",  1/100000000, "#fde68a", 0.75],
+  // ── EXALTED (1 in 10,000,000 – 1 in 99,999,998) ──────────────────────────
+  ["EXALTED",   "SERAPHIC",      1/70000000,  "#f9a8d4", 0.70],
+  ["EXALTED",   "ORACLE",        1/45000000,  "#f0c060", 0.68],
+  ["EXALTED",   "INFERNAL KING", 1/28000000,  "#ff6030", 0.65],
+  ["EXALTED",   "VOID WALKER",   1/18000000,  "#c026d3", 0.62],
+  ["EXALTED",   "STAR EATER",    1/10000000,  "#7c3aed", 0.59],
+  // ── MYTHIC (1 in 1,000,000 – 1 in 9,999,999) ─────────────────────────────
+  ["MYTHIC",    "DOOMBRINGER",   1/8000000,   "#dc2626", 0.52],
+  ["MYTHIC",    "ABYSSAL TIDE",  1/5000000,   "#9333ea", 0.49],
+  ["MYTHIC",    "RIFTBORN",      1/3000000,   "#3b82f6", 0.46],
+  ["MYTHIC",    "NEXUS CORE",    1/2000000,   "#06b6d4", 0.43],
+  ["MYTHIC",    "OBLIVION",      1/1000000,   "#94a3b8", 0.40],
+  // ── LEGENDARY (1 in 99,999 – 1 in 999,999) ───────────────────────────────
+  ["LEGENDARY", "WRAITH KING",   1/800000,    "#cbd5e1", 0.33],
+  ["LEGENDARY", "SPECTER",       1/500000,    "#a5b4fc", 0.30],
+  ["LEGENDARY", "BLOODMOON",     1/300000,    "#ef4444", 0.28],
+  ["LEGENDARY", "PRISMATIC",     1/200000,    "#e879f9", 0.26],
+  ["LEGENDARY", "TEMPEST",       1/130000,    "#60a5fa", 0.24],
+  ["LEGENDARY", "AURORA",        1/99999,     "#22d3ee", 0.22],
+  // ── UNIQUE (1 in 10,000 – 1 in 99,998) ───────────────────────────────────
+  ["UNIQUE",    "THUNDERSTRIKE", 1/80000,     "#818cf8", 0.18],
+  ["UNIQUE",    "RADIANCE",      1/55000,     "#fcd34d", 0.16],
+  ["UNIQUE",    "MAGMA LORD",    1/35000,     "#f97316", 0.14],
+  ["UNIQUE",    "DUSK REAPER",   1/22000,     "#c084fc", 0.12],
+  ["UNIQUE",    "ZENITH",        1/14000,     "#fde68a", 0.11],
+  ["UNIQUE",    "COMET TRAIL",   1/10000,     "#7dd3fc", 0.10],
+  // ── EPIC (1 in 1,000 – 1 in 9,999) ──────────────────────────────────────
+  ["EPIC",      "SANCTUM",       1/9000,      "#86efac", 0.09],
+  ["EPIC",      "VORTEX",        1/6000,      "#f472b6", 0.08],
+  ["EPIC",      "HARBINGER",     1/4000,      "#fdba74", 0.08],
+  ["EPIC",      "NEBULA",        1/2800,      "#34d399", 0.07],
+  ["EPIC",      "HELLFIRE",      1/1800,      "#ef4444", 0.06],
+  ["EPIC",      "DEEP SHADOW",   1/1200,      "#6366f1", 0.06],
+  ["EPIC",      "PERMAFROST",    1/1000,      "#a5f3fc", 0.05],
+  // ── COMMON (1 in 500 – 1 in 999) ─────────────────────────────────────────
+  ["COMMON",    "TOXIC",         1/900,       "#84cc16", 0.04],
+  ["COMMON",    "VENOM",         1/600,       "#65a30d", 0.04],
+  ["COMMON",    "CURSED",        1/750,       "#a855f7", 0.04],
+  // ── UNCOMMON (1 in 100 – 1 in 499) ───────────────────────────────────────
+  ["UNCOMMON",  "DUSK",          1/400,       "#a78bfa", 0.03],
+  ["UNCOMMON",  "SCORCH",        1/260,       "#fb923c", 0.03],
+  ["UNCOMMON",  "TIDE",          1/170,       "#38bdf8", 0.02],
+  ["UNCOMMON",  "MIRAGE",        1/110,       "#f0abfc", 0.02],
+  ["UNCOMMON",  "ASHFALL",       1/320,       "#d4d4d4", 0.02],
+  // ── SCARCE (1 in 10 – 1 in 99) ────────────────────────────────────────────
+  ["SCARCE",    "TREMOR",        1/70,        "#a16207", 0.01],
+  ["SCARCE",    "DEEP SEA",      1/45,        "#2563eb", 0.01],
+  ["SCARCE",    "OVERGROWTH",    1/28,        "#16a34a", 0.01],
+  ["SCARCE",    "EMBER",         1/18,        "#d97706", 0.01],
+  ["SCARCE",    "NIGHTFALL",     1/55,        "#4f46e5", 0.01],
+  // ── CRUDE (1 in 2 – 1 in 14) ───────────────────────────────────────────────
+  ["CRUDE",     "IRON",          1/14,        "#9ca3af", 0.005],
+  ["CRUDE",     "BLOOM",         1/11,        "#f472b6", 0.005],
+  ["CRUDE",     "FROST",         1/9,         "#7dd3fc", 0.005],
+  ["CRUDE",     "MOSS",          1/7,         "#4ade80", 0.005],
+  ["CRUDE",     "DUNE",          1/5,         "#fbbf24", 0.005],
+  ["CRUDE",     "GRANITE",       1/4,         "#a8a29e", 0],
+  ["CRUDE",     "CINDER",        1/3,         "#f87171", 0],
+  ["CRUDE",     "GALE",          1/2,         "#bae6fd", 0],
+];
+const AURA_MAP = Object.fromEntries(AURAS.map(a => [a[1], a]));
+
+
+// ── STAR AURAS (1-in-100k or rarer) ─────────────────────────────────────────
+const STAR_AURAS = new Set([
+  "THE LAST LIGHT","ZERO POINT","GODSLAYER","ETERNITY","AXIOM","PANTHEON",
+  "STARBORN","ASCENDANT","ANCIENT ONE","SOLFLARE","CELESTIAL","GILDED THRONE",
+  "SERAPHIC","ORACLE","INFERNAL KING","VOID WALKER","STAR EATER",
+  "DOOMBRINGER","ABYSSAL TIDE","RIFTBORN","NEXUS CORE","OBLIVION",
+  "WRAITH KING","SPECTER","BLOODMOON","PRISMATIC","TEMPEST"
+]);
+
+// ── AURA FONTS ────────────────────────────────────────────────────────────────
+const AURA_FONTS = {
+  // TRANSCENDENT
+  "THE LAST LIGHT":  "'Climate Crisis', sans-serif",
+  "ZERO POINT":      "'Major Mono Display', monospace",
+  "GODSLAYER":       "'Dela Gothic One', sans-serif",
+  "ETERNITY":        "'Cinzel', serif",
+  "AXIOM":           "'Orbitron', sans-serif",
+  "PANTHEON":        "'Cinzel', serif",
+  // GLORIOUS
+  "STARBORN":        "'Monoton', sans-serif",
+  "ASCENDANT":       "'Bungee Shade', sans-serif",
+  "ANCIENT ONE":     "'Playfair Display', serif",
+  "SOLFLARE":        "'Faster One', sans-serif",
+  "CELESTIAL":       "'Raleway', sans-serif",
+  "GILDED THRONE":   "'Cinzel', serif",
+  // EXALTED
+  "SERAPHIC":        "'Playfair Display', serif",
+  "ORACLE":          "'Oxanium', sans-serif",
+  "INFERNAL KING":   "'Dela Gothic One', sans-serif",
+  "VOID WALKER":     "'Major Mono Display', monospace",
+  "STAR EATER":      "'Orbitron', sans-serif",
+  // MYTHIC
+  "DOOMBRINGER":     "'Black Ops One', sans-serif",
+  "ABYSSAL TIDE":    "'Rubik Glitch', sans-serif",
+  "RIFTBORN":        "'Orbitron', sans-serif",
+  "NEXUS CORE":      "'Exo 2', sans-serif",
+  "OBLIVION":        "'Major Mono Display', monospace",
+  // LEGENDARY
+  "WRAITH KING":     "'Creepster', sans-serif",
+  "SPECTER":         "'Special Elite', serif",
+  "BLOODMOON":       "'Creepster', sans-serif",
+  "PRISMATIC":       "'Monoton', sans-serif",
+  "TEMPEST":         "'Russo One', sans-serif",
+  "AURORA":          "'Raleway', sans-serif",
+  // UNIQUE
+  "THUNDERSTRIKE":   "'Black Ops One', sans-serif",
+  "RADIANCE":        "'Righteous', sans-serif",
+  "MAGMA LORD":      "'Faster One', sans-serif",
+  "DUSK REAPER":     "'Bebas Neue', sans-serif",
+  "ZENITH":          "'Exo 2', sans-serif",
+  "COMET TRAIL":     "'Oxanium', sans-serif",
+  // EPIC
+  "SANCTUM":         "'Cinzel', serif",
+  "VORTEX":          "'Rubik Glitch', sans-serif",
+  "HARBINGER":       "'Black Ops One', sans-serif",
+  "NEBULA":          "'Orbitron', sans-serif",
+  "HELLFIRE":        "'Dela Gothic One', sans-serif",
+  "DEEP SHADOW":     "'Special Elite', serif",
+  "PERMAFROST":      "'Silkscreen', sans-serif",
+  // COMMON
+  "TOXIC":           "'VT323', monospace",
+  "VENOM":           "'VT323', monospace",
+  "CURSED":          "'Creepster', sans-serif",
+  // UNCOMMON
+  "DUSK":            "'Bebas Neue', sans-serif",
+  "SCORCH":          "'Righteous', sans-serif",
+  "TIDE":            "'Caveat', cursive",
+  "MIRAGE":          "'Raleway', sans-serif",
+  "ASHFALL":         "'Special Elite', serif",
+  // SCARCE
+  "TREMOR":          "'Russo One', sans-serif",
+  "DEEP SEA":        "'Caveat', cursive",
+  "OVERGROWTH":      "'Permanent Marker', cursive",
+  "EMBER":           "'Righteous', sans-serif",
+  "NIGHTFALL":       "'Bebas Neue', sans-serif",
+  // CRUDE
+  "IRON":            "'Silkscreen', sans-serif",
+  "BLOOM":           "'Caveat', cursive",
+  "FROST":           "'Exo 2', sans-serif",
+  "MOSS":            "'Permanent Marker', cursive",
+  "DUNE":            "'Special Elite', serif",
+  "GRANITE":         "'Russo One', sans-serif",
+  "CINDER":          "'VT323', monospace",
+  "GALE":            "'Caveat', cursive",
+};
+function getAuraFont(name) {
+  return AURA_FONTS[name] || "'Syne', sans-serif";
+}
+const TIER_ORDER = ["CRUDE","SCARCE","UNCOMMON","COMMON","EPIC","UNIQUE","LEGENDARY","MYTHIC","EXALTED","GLORIOUS","TRANSCENDENT"];
+const TIER_COLORS = {
+  CRUDE:"#6b7280", SCARCE:"#a78bfa", UNCOMMON:"#60a5fa", COMMON:"#4ade80",
+  EPIC:"#10b981", UNIQUE:"#818cf8",
+  LEGENDARY:"#f59e0b", MYTHIC:"#ec4899", EXALTED:"#f0c060", GLORIOUS:"#c084fc", TRANSCENDENT:"#ffffff"
+};
+
+const POTIONS = [
+  // Luck potions
+  {id:"m",  type:"luck",  label:"Minor Luck",        cost:10,  mult:1.2,  secs:60,  icon:"🧪"},
+  {id:"j",  type:"luck",  label:"Major Luck",        cost:30,  mult:1.5,  secs:120, icon:"⚗️"},
+  {id:"g",  type:"luck",  label:"Grand Luck",        cost:75,  mult:2.0,  secs:180, icon:"✨"},
+  // Speed potions (reduce cooldown by a flat % — additive with glove speed)
+  {id:"sm", type:"speed", label:"Minor Haste",       cost:15,  speed:0.15, secs:60,  icon:"⚡"},
+  {id:"sj", type:"speed", label:"Major Haste",       cost:40,  speed:0.30, secs:120, icon:"🌀"},
+  {id:"sg", type:"speed", label:"Grand Haste",       cost:100, speed:0.50, secs:180, icon:"💨"},
+];
+const SHOP_POTIONS = [
+  {id:"m",  label:"Minor Luck Potion",   coinCost:25},
+  {id:"j",  label:"Major Luck Potion",   coinCost:80},
+  {id:"g",  label:"Grand Luck Potion",   coinCost:200},
+  {id:"sm", label:"Minor Haste Potion",  coinCost:35},
+  {id:"sj", label:"Major Haste Potion",  coinCost:110},
+  {id:"sg", label:"Grand Haste Potion",  coinCost:280},
+];
+const TIER_COINS = {CRUDE:0,SCARCE:0,UNCOMMON:0,COMMON:0,EPIC:5,UNIQUE:15,LEGENDARY:40,MYTHIC:120,EXALTED:350,GLORIOUS:1000,TRANSCENDENT:5000};
+
+// ── SHOP STOCK SYSTEM ─────────────────────────────────────────────────────────
+const SHOP_RESTOCK_MS = 10 * 60 * 1000; // 10 minutes
+// Stock range per potion type: [min, max]
+const SHOP_STOCK_RANGES = {
+  m:  [1, 10],  // Minor Luck: 1–10
+  j:  [1, 5],   // Major Luck: 1–5
+  g:  [1, 3],   // Grand Luck: 1–3
+  sm: [1, 10],  // Minor Haste: 1–10
+  sj: [1, 5],   // Major Haste: 1–5
+  sg: [1, 3],   // Grand Haste: 1–3
+};
+
+function randStock(id) {
+  const [mn, mx] = SHOP_STOCK_RANGES[id];
+  return Math.floor(Math.random() * (mx - mn + 1)) + mn;
+}
+
+function initShopStock() {
+  if (!S.shopStock) {
+    S.shopStock = {};
+    SHOP_POTIONS.forEach(sp => { S.shopStock[sp.id] = randStock(sp.id); });
+    S.shopNextRestock = Date.now() + SHOP_RESTOCK_MS;
+  }
+}
+
+function checkShopRestock() {
+  if (!S.shopStock || !S.shopNextRestock) { initShopStock(); return; }
+  if (Date.now() >= S.shopNextRestock) {
+    SHOP_POTIONS.forEach(sp => { S.shopStock[sp.id] = randStock(sp.id); });
+    S.shopNextRestock = Date.now() + SHOP_RESTOCK_MS;
+    logPush('🏪 Shop restocked!', true);
+    toast('🏪 Shop restocked!');
+    renderBank();
+  }
+}
+
+// ── BIOMES ────────────────────────────────────────────────────────────────────
+const BIOMES = [
+  {
+    id: "rainy",
+    name: "Rainstorm",
+    icon: "🌧️",
+    desc: "Heavy rain blesses water auras",
+    duration: 90,   // seconds active
+    spawnChance: 0.18,
+    boosted: ["DEEP SEA","TIDE","FROST","MIRAGE"],
+    luckMult: 3.5,
+    // visual
+    hueShift: 200,      // blue hue
+    overlayColor: "rgba(30,60,120,0.22)",
+    particleColor: "#60a5fa",
+    particleType: "rain",
+  },
+  {
+    id: "windy",
+    name: "Gale Force",
+    icon: "💨",
+    desc: "Howling winds empower storm auras",
+    duration: 75,
+    spawnChance: 0.20,
+    boosted: ["GALE","TREMOR","THUNDERSTRIKE","TEMPEST","AURORA"],
+    luckMult: 3.0,
+    hueShift: 180,
+    overlayColor: "rgba(100,200,220,0.10)",
+    particleColor: "#bae6fd",
+    particleType: "wind",
+  },
+  {
+    id: "volcanic",
+    name: "Eruption",
+    icon: "🌋",
+    desc: "Volcanic heat ignites fire auras",
+    duration: 60,
+    spawnChance: 0.14,
+    boosted: ["EMBER","CINDER","SCORCH","HELLFIRE","MAGMA LORD"],
+    luckMult: 4.0,
+    hueShift: 15,
+    overlayColor: "rgba(200,60,20,0.13)",
+    particleColor: "#f97316",
+    particleType: "ember",
+  },
+  {
+    id: "eclipse",
+    name: "Eclipse",
+    icon: "🌑",
+    desc: "Darkness amplifies shadow auras",
+    duration: 80,
+    spawnChance: 0.12,
+    boosted: ["DEEP SHADOW","ABYSSAL TIDE","VOID WALKER","STAR EATER","DOOMBRINGER","OBLIVION"],
+    luckMult: 4.5,
+    hueShift: 270,
+    overlayColor: "rgba(80,0,120,0.15)",
+    particleColor: "#a78bfa",
+    particleType: "void",
+  },
+  {
+    id: "blizzard",
+    name: "Blizzard",
+    icon: "❄️",
+    desc: "Freezing winds empower ice auras",
+    duration: 85,
+    spawnChance: 0.15,
+    boosted: ["FROST","PERMAFROST","RIFTBORN"],
+    luckMult: 4.0,
+    hueShift: 210,
+    overlayColor: "rgba(180,220,255,0.18)",
+    particleColor: "#e0f2fe",
+    particleType: "snow",
+  },
+  {
+    id: "aurora",
+    name: "Aurora Borealis",
+    icon: "🌌",
+    desc: "Cosmic lights bless rare celestial auras",
+    duration: 120,
+    spawnChance: 0.08,
+    boosted: ["AURORA","CELESTIAL","SOLFLARE","STARBORN","GILDED THRONE"],
+    luckMult: 5.0,
+    hueShift: 150,
+    overlayColor: "rgba(0,200,150,0.10)",
+    particleColor: "#67e8f9",
+    particleType: "aurora",
+  },
+];
+const BIOME_MAP = Object.fromEntries(BIOMES.map(b => [b.id, b]));
+
+const GLOVES = [
+  // Early game — CRUDE auras
+  {id:"basic",    name:"Basic Wraps",        desc:"+5% luck",      mult:1.05,  speed:0,    recipe:{"GALE":10, "DUNE":5}},
+  {id:"moss",     name:"Moss Gloves",        desc:"+10% luck",     mult:1.10,  speed:0,    recipe:{"MOSS":8,  "GRANITE":5, "GALE":12}},
+  {id:"ember",    name:"Ember Gloves",       desc:"+15% luck",     mult:1.15,  speed:0,    recipe:{"EMBER":6, "MOSS":10,  "CINDER":8}},
+  {id:"iron",     name:"Iron Gauntlets",     desc:"+25% luck",     mult:1.25,  speed:0,    recipe:{"IRON":5,  "BLOOM":3,  "EMBER":8}},
+  // Mid game — SCARCE/UNCOMMON auras
+  {id:"deepsea",  name:"Deep Sea Gloves",    desc:"+40% luck",               mult:1.4,   speed:0,    recipe:{"DEEP SEA":8, "FROST":5,  "IRON":6}},
+  {id:"tremor",   name:"Tremor Fists",       desc:"+60% luck · 10% faster",  mult:1.6,   speed:0.10, recipe:{"TREMOR":6, "DEEP SEA":8,  "MIRAGE":4}},
+  {id:"tide",     name:"Tide Gloves",        desc:"+90% luck · 15% faster",  mult:1.9,   speed:0.15, recipe:{"TIDE":5,  "SCORCH":6, "DUSK":4}},
+  {id:"mirage",   name:"Mirage Wraps",       desc:"+130% luck · 20% faster", mult:2.3,   speed:0.20, recipe:{"MIRAGE":6, "TIDE":5,  "VENOM":4, "ASHFALL":3}},
+  // Upper mid — EPIC auras
+  {id:"permafrost",name:"Permafrost Fists",  desc:"+190% luck · 25% faster", mult:2.9,   speed:0.25, recipe:{"PERMAFROST":5, "DEEP SHADOW":4, "HELLFIRE":3}},
+  {id:"nebula",   name:"Nebula Gloves",      desc:"+280% luck · 30% faster", mult:3.8,   speed:0.30, recipe:{"NEBULA":4, "HARBINGER":3, "VORTEX":2}},
+  {id:"sanctum",  name:"Sanctum Gauntlets",  desc:"+400% luck · 35% faster", mult:5.0,   speed:0.35, recipe:{"SANCTUM":3, "NEBULA":5, "PERMAFROST":4, "VORTEX":3}},
+  // Late game — UNIQUE auras
+  {id:"comet",    name:"Comet Gauntlets",    desc:"+550% luck · 40% faster", mult:6.5,   speed:0.40, recipe:{"COMET TRAIL":3, "ZENITH":4, "DUSK REAPER":2, "SANCTUM":2}},
+  {id:"zenith",   name:"Zenith Gloves",      desc:"+750% luck · 45% faster", mult:8.5,   speed:0.45, recipe:{"ZENITH":2, "MAGMA LORD":3, "RADIANCE":2, "COMET TRAIL":3}},
+  {id:"thunder",  name:"Thunderstrike Gloves",desc:"+1,000% luck · 50% faster",mult:11.0,speed:0.50, recipe:{"THUNDERSTRIKE":3, "ZENITH":2, "RADIANCE":3, "MAGMA LORD":4}},
+  // End game — LEGENDARY auras
+  {id:"aurora",   name:"Aurora Wraps",       desc:"+1,250% luck · 55% faster",mult:13.5, speed:0.55, recipe:{"AURORA":2, "TEMPEST":3, "PRISMATIC":2, "BLOODMOON":2}},
+  {id:"wraith",   name:"Wraith King Gloves", desc:"+1,500% luck · 60% faster",mult:16.0, speed:0.60, recipe:{"WRAITH KING":2, "SPECTER":2, "AURORA":3, "TEMPEST":2}},
+  // Endgame — MYTHIC auras
+  {id:"oblivion", name:"Oblivion Gauntlets", desc:"+1,750% luck · 65% faster",mult:18.5, speed:0.65, recipe:{"OBLIVION":1, "NEXUS CORE":1, "RIFTBORN":1, "ABYSSAL TIDE":2}},
+  {id:"doom",     name:"Doombringer Gauntlets",desc:"+2,000% luck · 70% faster",mult:21.0,speed:0.70,recipe:{"DOOMBRINGER":1, "ABYSSAL TIDE":1, "RIFTBORN":2, "NEXUS CORE":1}},
+];
+const POTION_MAP = Object.fromEntries(POTIONS.map(p => [p.id, p]));
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+let S = {
+  rolls:0, coins:0,
+  invAuras:{}, invPotions:{},
+  crafted:[], glove:null,
+  log:[], last:null, buff:null, speedBuff:null,
+  autoSpeed:0,
+  quickRoll:false,
+  biome: null,
+  testerMode: false,
+  shopStock: null,
+  shopNextRestock: null,
+  // Settings
+  settings: {
+    autoUseLuck:    false,  // auto-use best luck potion when expired
+    autoUseHaste:   false,  // auto-use best haste potion when expired
+    autoBuyPotions: false,  // auto-buy potions when stock is 0
+    autoBuyTargets: { m:3, j:2, g:1, sm:3, sj:2, sg:1 }, // desired stock per potion
+    logFilter: { crude:true, scarce:true, uncommon:true, common:true, epic:true, unique:true, legendary:true, mythic:true, exalted:true, glorious:true, transcendent:true, gilded:true, special:true },
+    flashOnRare:    true,
+    particleFX:     true,
+  },
+};
+
+// ── TESTER MODE ───────────────────────────────────────────────────────────────
+const TESTER_LUCK = 10000000; // 10M× — ratios preserved (no cap), legendaries become common, transcendents still rare
+
+function toggleTester() {
+  S.testerMode = !S.testerMode;
+  const btn = document.getElementById('tester-btn');
+  btn.classList.toggle('tester-on', S.testerMode);
+  btn.textContent = S.testerMode ? '⬡ DEV ON' : '⬡ DEV';
+  document.body.classList.toggle('tester-active', S.testerMode);
+
+  if (S.testerMode) {
+    // Give all auras (×1 each so they show as discovered)
+    AURAS.forEach(([tier, name]) => {
+      if (!S.invAuras[name]) S.invAuras[name] = 1;
+    });
+    // Give all potions
+    S.invPotions['m'] = 999;
+    S.invPotions['j'] = 999;
+    S.invPotions['g'] = 999;
+    S.invPotions['sm'] = 999;
+    S.invPotions['sj'] = 999;
+    S.invPotions['sg'] = 999;
+    // Max coins
+    S.coins = 99999;
+    // Instant roll
+    S.quickRoll = true;
+    const qb = document.getElementById('quick-btn');
+    if (qb) { qb.textContent = '⚡ Quick: ON'; qb.classList.add('active'); }
+    logPush('🔧 TESTER MODE ON — Max Luck, All Auras, Instant Rolls', true);
+    toast('🔧 Tester Mode ON');
+  } else {
+    logPush('Tester Mode OFF', false);
+    toast('Tester Mode OFF');
+  }
+  renderAll();
+  buildTesterBiomeBar();
+}
+
+function buildTesterBiomeBar() {
+  const bar = document.getElementById('tester-biome-bar');
+  if (!bar) return;
+  // Clear existing buttons (keep label)
+  [...bar.querySelectorAll('.tester-biome-btn')].forEach(b => b.remove());
+  const activeBiomeId = S.biome && Date.now()/1000 < S.biome.expires ? S.biome.id : null;
+  // Clear button
+  const clearBtn = document.createElement('button');
+  clearBtn.className = 'tester-biome-btn clear-btn' + (!activeBiomeId ? ' active' : '');
+  clearBtn.textContent = '✕ None';
+  clearBtn.onclick = () => { S.biome = null; stopBiomeVisual(); renderAll(); buildTesterBiomeBar(); };
+  bar.appendChild(clearBtn);
+  // One button per biome
+  BIOMES.forEach(b => {
+    const btn = document.createElement('button');
+    btn.className = 'tester-biome-btn' + (activeBiomeId === b.id ? ' active' : '');
+    btn.textContent = `${b.icon} ${b.name}`;
+    btn.onclick = () => { spawnBiome(b.id); buildTesterBiomeBar(); };
+    bar.appendChild(btn);
+  });
+}
+
+function forceBiome(id) {
+  spawnBiome(id);
+  buildTesterBiomeBar();
+}
+
+function totalLuck() {
+  // In tester mode, return insane luck
+  if (S.testerMode) return TESTER_LUCK;
+
+  let l = 1.0;
+  if (S.buff) {
+    if (Date.now()/1000 < S.buff.expires) l *= S.buff.mult;
+    else S.buff = null;
+  }
+  if (S.glove) {
+    const g = GLOVES.find(x=>x.id===S.glove);
+    if (g) l *= g.mult;
+  }
+  return Math.round(l * 100) / 100;
+}
+
+function biomeLuckFor(auraName) {
+  if (!S.biome) return 1.0;
+  const b = BIOME_MAP[S.biome.id];
+  if (!b || Date.now()/1000 >= S.biome.expires) return 1.0;
+  return b.boosted.includes(auraName) ? b.luckMult : 1.0;
+}
+
+// ── ROLLING ───────────────────────────────────────────────────────────────────
+function weightedRoll(luck) {
+  // In tester mode: no 1.0 cap so ratios are perfectly preserved, but luck still scales all weights proportionally
+  const weights = S.testerMode
+    ? AURAS.map(a => a[2] * luck * biomeLuckFor(a[1]))
+    : AURAS.map(a => Math.min(a[2] * luck * biomeLuckFor(a[1]), 1.0));
+  const total = weights.reduce((s, w) => s + w, 0);
+  let r = Math.random() * total;
+  for (let i = 0; i < AURAS.length; i++) {
+    r -= weights[i];
+    if (r <= 0) {
+      const [tier, name, chance, color, gc] = AURAS[i];
+      return {tier, name, chance, color, gilded: gc > 0 && Math.random() < gc};
+    }
+  }
+  const [tier,name,chance,color] = AURAS[AURAS.length-1];
+  return {tier, name, chance, color, gilded: false};
+}
+
+function fmtChance(chance, luck) {
+  const eff = Math.min(chance * luck, 1.0);
+  if (eff >= 1) return "guaranteed";
+  const n = Math.round(1/eff);
+  return `1 in ${n.toLocaleString()}`;
+}
+
+let rolling = false;
+let lastManualRoll = 0;
+let cutsceneAnimFrame = null;
+
+// ── CUTSCENE ENGINE ───────────────────────────────────────────────────────────
+function getCutsceneTier(chance) {
+  if (chance <= 1/100000000) return 'glorious';    // GLORIOUS+
+  if (chance <= 1/10000000)  return 'exalted';     // EXALTED
+  if (chance <= 1/1000000)   return 'mythic';      // MYTHIC
+  if (chance <= 1/100000)    return 'legendary';   // LEGENDARY
+  if (chance <= 1/10000)     return 'unique';      // UNIQUE
+  if (chance <= 1/1000)      return 'epic';        // EPIC
+  return null;
+}
+
+async function playCutscene(result) {
+  const tier = getCutsceneTier(result.chance);
+  if (!tier) return;
+
+  const color = result.color;
+  const rgb = hexToRgb(color);
+  const cs = document.getElementById('cutscene');
+  const bg = document.getElementById('cutscene-bg');
+  const vignette = document.getElementById('cutscene-vignette');
+  const fog = document.getElementById('cutscene-fog');
+  const canvas = document.getElementById('cutscene-canvas');
+  const nameWrap = document.getElementById('cutscene-name-wrap');
+  const nameEl = document.getElementById('cutscene-name');
+  const tierEl = document.getElementById('cutscene-tier');
+  const chanceEl = document.getElementById('cutscene-chance');
+
+  cs.style.opacity = '1';
+  cs.classList.add('active');
+  nameWrap.style.opacity = '0';
+  nameWrap.style.transform = 'scale(0.85)';
+
+  // ── Phase 1: Blackout ─────────────────────────────────────────────────────
+  bg.style.opacity = '1';
+
+  const blackoutMs = {
+    epic: 500, unique: 700, legendary: 900, mythic: 1100, exalted: 1400, glorious: 1800
+  }[tier];
+  await sleep(blackoutMs);
+
+  // ── Phase 2: Vignette edge glow ───────────────────────────────────────────
+  vignette.style.background = `radial-gradient(ellipse at center, transparent 40%, rgba(${rgb.r},${rgb.g},${rgb.b},0.55) 100%)`;
+  vignette.style.opacity = '1';
+
+  // ── Phase 3: Fog for higher tiers ─────────────────────────────────────────
+  if (tier === 'exalted' || tier === 'glorious') {
+    fog.style.background = `radial-gradient(ellipse at 50% 60%, rgba(${rgb.r},${rgb.g},${rgb.b},0.12) 0%, transparent 70%)`;
+    fog.style.opacity = '1';
+  }
+
+  // ── Phase 4: Canvas FX (spinning star, particles) ─────────────────────────
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  const ctx = canvas.getContext('2d');
+  const cx = canvas.width / 2, cy = canvas.height / 2;
+
+  if (cutsceneAnimFrame) { cancelAnimationFrame(cutsceneAnimFrame); cutsceneAnimFrame = null; }
+
+  const points = tier === 'exalted' || tier === 'glorious' ? 8 : 4;
+  const hasstar = tier !== 'epic';
+  let starAngle = 0;
+  let starScale = 0;
+  let t = 0;
+
+  // Particles for higher tiers
+  const particles = [];
+  if (tier === 'mythic' || tier === 'exalted' || tier === 'glorious') {
+    for (let i = 0; i < 80; i++) {
+      particles.push({
+        x: (Math.random() - 0.5) * canvas.width,
+        y: (Math.random() - 0.5) * canvas.height,
+        vx: (Math.random() - 0.5) * 1.2,
+        vy: -(0.3 + Math.random() * 1.0),
+        size: 1 + Math.random() * 2.5,
+        alpha: 0.4 + Math.random() * 0.6,
+        life: Math.random(),
+        maxLife: 1.5 + Math.random() * 2,
+      });
+    }
+  }
+
+  // Shockwave rings for legendary+
+  const rings = [];
+  if (tier === 'legendary' || tier === 'mythic' || tier === 'exalted' || tier === 'glorious') {
+    for (let i = 0; i < 3; i++) {
+      rings.push({ r: 0, maxR: 300 + i * 80, alpha: 0.6, delay: i * 200, born: Date.now() });
+    }
+  }
+
+  function drawStar(ctx, cx, cy, outerR, innerR, points, angle) {
+    ctx.beginPath();
+    for (let i = 0; i < points * 2; i++) {
+      const r = i % 2 === 0 ? outerR : innerR;
+      const a = (i / (points * 2)) * Math.PI * 2 + angle;
+      i === 0 ? ctx.moveTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r)
+              : ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+    }
+    ctx.closePath();
+  }
+
+  const animStart = Date.now();
+  const starAppearDelay = { epic:0, unique:400, legendary:500, mythic:600, exalted:800, glorious:1000 }[tier];
+
+  function csLoop() {
+    t = (Date.now() - animStart) / 1000;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Shockwave rings
+    rings.forEach(ring => {
+      const elapsed = Date.now() - ring.born - ring.delay;
+      if (elapsed < 0) return;
+      ring.r = Math.min((elapsed / 1200) * ring.maxR, ring.maxR);
+      const fade = 1 - ring.r / ring.maxR;
+      ctx.beginPath();
+      ctx.arc(cx, cy, ring.r, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${fade * 0.5})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    });
+
+    // Floating particles
+    particles.forEach(p => {
+      p.life += 0.012; p.x += p.vx; p.y += p.vy;
+      if (p.life >= p.maxLife) {
+        p.life = 0;
+        p.x = (Math.random() - 0.5) * canvas.width;
+        p.y = canvas.height * 0.5 + Math.random() * canvas.height * 0.5;
+      }
+      const fade = Math.sin((p.life / p.maxLife) * Math.PI);
+      ctx.beginPath();
+      ctx.arc(cx + p.x, cy + p.y * 0.4, Math.max(0.1, p.size * fade), 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${p.alpha * fade})`;
+      ctx.fill();
+    });
+
+    // Spinning star
+    if (hasstar && t * 1000 > starAppearDelay) {
+      starScale = Math.min(starScale + 0.03, 1);
+      const spinSpeed = { unique:0.8, legendary:1.0, mythic:1.3, exalted:1.6, glorious:2.0 }[tier] || 0.8;
+      starAngle += spinSpeed * 0.04;
+
+      const outerR = (90 + Math.sin(t * 2) * 8) * starScale;
+      const innerR = outerR * (points === 8 ? 0.45 : 0.38);
+
+      // Star glow
+      const glowGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, outerR * 1.8);
+      glowGrad.addColorStop(0, `rgba(${rgb.r},${rgb.g},${rgb.b},0.25)`);
+      glowGrad.addColorStop(1, `rgba(${rgb.r},${rgb.g},${rgb.b},0)`);
+      ctx.beginPath(); ctx.arc(cx, cy, outerR * 1.8, 0, Math.PI * 2);
+      ctx.fillStyle = glowGrad; ctx.fill();
+
+      // Beam lines for glorious
+      if (tier === 'glorious') {
+        for (let b = 0; b < 8; b++) {
+          const ba = starAngle * 0.5 + (b / 8) * Math.PI * 2;
+          const bLen = outerR * 2.5;
+          ctx.save(); ctx.translate(cx, cy); ctx.rotate(ba);
+          const bg2 = ctx.createLinearGradient(0, 0, bLen, 0);
+          bg2.addColorStop(0, `rgba(${rgb.r},${rgb.g},${rgb.b},0.3)`);
+          bg2.addColorStop(1, `rgba(${rgb.r},${rgb.g},${rgb.b},0)`);
+          ctx.beginPath(); ctx.moveTo(0, -1.5); ctx.lineTo(bLen, 0); ctx.lineTo(0, 1.5);
+          ctx.fillStyle = bg2; ctx.fill(); ctx.restore();
+        }
+      }
+
+      // Draw star fill
+      drawStar(ctx, cx, cy, outerR, innerR, points, starAngle);
+      const starGrad = ctx.createRadialGradient(cx, cy, innerR * 0.3, cx, cy, outerR);
+      starGrad.addColorStop(0, `rgba(255,255,255,0.95)`);
+      starGrad.addColorStop(0.4, `rgba(${rgb.r},${rgb.g},${rgb.b},0.9)`);
+      starGrad.addColorStop(1, `rgba(${rgb.r},${rgb.g},${rgb.b},0.5)`);
+      ctx.fillStyle = starGrad; ctx.fill();
+
+      // Star outline glow
+      drawStar(ctx, cx, cy, outerR, innerR, points, starAngle);
+      ctx.strokeStyle = `rgba(255,255,255,0.6)`;
+      ctx.lineWidth = 1.5; ctx.stroke();
+    }
+
+    cutsceneAnimFrame = requestAnimationFrame(csLoop);
+  }
+  csLoop();
+
+  // ── Phase 5: Hold the star, build anticipation ────────────────────────────
+  const holdMs = {
+    epic: 1000, unique: 1500, legendary: 2000, mythic: 2600, exalted: 3200, glorious: 4000
+  }[tier];
+  await sleep(holdMs);
+
+  // ── Phase 6: Reveal — stop star, show name ────────────────────────────────
+  if (cutsceneAnimFrame) { cancelAnimationFrame(cutsceneAnimFrame); cutsceneAnimFrame = null; }
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Big burst flash
+  flashScreen(color);
+
+  // Name reveal
+  nameEl.textContent = result.name;
+  nameEl.style.color = color;
+  nameEl.style.fontFamily = getAuraFont(result.name);
+  nameEl.classList.remove('rare-font', 'transcendent-font');
+  if (result.chance <= 1/10000000) nameEl.classList.add('transcendent-font');
+  else if (result.chance <= 1/1000) nameEl.classList.add('rare-font');
+
+  tierEl.textContent = result.tier;
+  tierEl.style.color = color;
+  chanceEl.textContent = fmtChance(result.chance, 1);
+
+  nameWrap.style.opacity = '1';
+  nameWrap.style.transform = 'scale(1)';
+
+  // Hold on name
+  const revealHoldMs = {
+    epic: 1400, unique: 1800, legendary: 2200, mythic: 2800, exalted: 3400, glorious: 4200
+  }[tier];
+  await sleep(revealHoldMs);
+
+  // ── Phase 7: Fade out ─────────────────────────────────────────────────────
+  cs.style.transition = 'opacity 0.9s ease';
+  cs.style.opacity = '0';
+  await sleep(950);
+
+  // Reset
+  cs.style.opacity = '';
+  cs.style.transition = '';
+  cs.classList.remove('active');
+  bg.style.opacity = '0';
+  vignette.style.opacity = '0';
+  fog.style.opacity = '0';
+  nameWrap.style.opacity = '0';
+  nameWrap.style.transform = 'scale(0.85)';
+  nameEl.classList.remove('rare-font', 'transcendent-font');
+}
+
+async function doRoll(auto=false) {
+  if (rolling) return;
+
+  // Manual cooldown enforcement
+  if (!auto && !S.testerMode) {
+    const cd = currentCooldownMs();
+    const elapsed = Date.now() - lastManualRoll;
+    if (elapsed < cd) {
+      const remaining = ((cd - elapsed) / 1000).toFixed(1);
+      toast(`Cooldown: ${remaining}s`);
+      return;
+    }
+    lastManualRoll = Date.now();
+  }
+
+  rolling = true;
+  const btn = document.getElementById('roll-btn');
+  if (btn) btn.disabled = true;
+
+  const luck = totalLuck();
+
+  // Determine result first so we know if a cutscene is needed
+  const result = weightedRoll(luck);
+  const hasCutscene = !S.testerMode && !S.quickRoll && getCutsceneTier(result.chance) !== null;
+
+  if (!S.testerMode && !S.quickRoll) {
+    if (hasCutscene) {
+      // Short slot flicker then full cutscene
+      stopAuraAnim();
+      const nameEl = document.getElementById('roll-name');
+      nameEl.classList.add('animate');
+      for (let i = 0; i < 6; i++) {
+        const fake = AURAS[Math.floor(Math.random() * AURAS.length)];
+        nameEl.textContent = fake[1];
+        nameEl.style.color = fake[3];
+        nameEl.style.fontFamily = getAuraFont(fake[1]);
+        await sleep(90);
+      }
+      nameEl.classList.remove('animate');
+      await playCutscene(result);
+    } else {
+      // Normal quick slot flicker
+      stopAuraAnim();
+      const nameEl = document.getElementById('roll-name');
+      nameEl.classList.add('animate');
+      for (let i = 0; i < 10; i++) {
+        const fake = AURAS[Math.floor(Math.random() * AURAS.length)];
+        nameEl.textContent = fake[1];
+        nameEl.style.color = fake[3];
+        nameEl.style.fontFamily = getAuraFont(fake[1]);
+        await sleep(110);
+      }
+      nameEl.classList.remove('animate');
+    }
+  }
+
+  S.rolls++;
+  const isNew = !S.invAuras[result.name];
+  S.invAuras[result.name] = (S.invAuras[result.name]||0) + 1;
+  S.last = result;
+
+  // COINS: award on gilded
+  let coinsEarned = 0;
+  if (result.gilded) {
+    coinsEarned = TIER_COINS[result.tier] || 0;
+    S.coins += coinsEarned;
+    if (!hasCutscene) flashScreen(result.color);
+  } else {
+    const ti = TIER_ORDER.indexOf(result.tier);
+    if (ti >= 4 && !hasCutscene) flashScreen(result.color);
+  }
+
+  const ti = TIER_ORDER.indexOf(result.tier);
+  if (isNew) {
+    logPush(`NEW! ${result.name} (${result.tier})${coinsEarned ? ` +${coinsEarned}c` : ''}`, true, result.tier, result.gilded);
+  } else if (result.gilded) {
+    logPush(`✦ GILDED ${result.name} +${coinsEarned} coins`, false, result.tier, true);
+  } else if (ti >= 3) {
+    logPush(`${result.name} (${result.tier})`, true, result.tier, false);
+  } else {
+    logPush(`rolled ${result.name}`, false, result.tier, false);
+  }
+
+  renderAll();
+  rolling = false;
+  if (btn) btn.disabled = false;
+}
+
+function flashScreen(color) {
+  if (!S.settings.flashOnRare) return;
+  const f = document.getElementById('flash');
+  f.style.background = color;
+  f.style.opacity = '0.12';
+  setTimeout(() => { f.style.opacity = '0'; }, 120);
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function logPush(msg, special=false, tier=null, isGilded=false) {
+  // Apply log filter
+  if (!logAllowedForTier(tier, special && !tier, isGilded)) return;
+  S.log.push({msg, special});
+  if (S.log.length > 60) S.log.shift();
+}
+
+// ── AUTO ROLL ENGINE ──────────────────────────────────────────────────────────
+let autoTimer = null;
+function startAutoRoll() {
+  stopAutoRoll();
+  if (!S.autoSpeed) return;
+  function scheduleNext() {
+    if (!S.autoSpeed) return;
+    autoTimer = setTimeout(async () => {
+      if (S.autoSpeed) {
+        await doRoll(true);
+        scheduleNext();
+      }
+    }, currentCooldownMs());
+  }
+  scheduleNext();
+}
+function stopAutoRoll() {
+  if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+}
+function setAutoSpeed(ms) {
+  S.autoSpeed = ms;
+  startAutoRoll();
+  renderAuto();
+  renderStats();
+}
+
+// ── POTIONS ───────────────────────────────────────────────────────────────────
+function usePot(id) {
+  const cnt = S.invPotions[id]||0;
+  const p = POTION_MAP[id];
+  if (cnt <= 0) { toast(`No ${p.label} — buy from Bank!`); return; }
+  if (p.type === 'speed') {
+    if (S.speedBuff && Date.now()/1000 < S.speedBuff.expires) { toast("A haste potion is already active!"); return; }
+    S.invPotions[id] = cnt - 1;
+    S.speedBuff = {...p, expires: Date.now()/1000 + p.secs};
+    logPush(`${p.label} active for ${p.secs}s!`, true);
+    restartAutoIfRunning();
+  } else {
+    if (S.buff) { toast("A luck potion is already active!"); return; }
+    S.invPotions[id] = cnt - 1;
+    S.buff = {...p, expires: Date.now()/1000 + p.secs};
+    logPush(`${p.label} active for ${p.secs}s!`, true);
+  }
+  renderAll();
+}
+
+// ── ROLL SPEED ────────────────────────────────────────────────────────────────
+const BASE_COOLDOWN_MS = 800; // base manual & auto cooldown
+
+function totalSpeed() {
+  // Returns a 0–1 fraction of how much cooldown is reduced.
+  // Glove speed bonus and speed potion bonus are additive (same as luck system).
+  // Capped at 0.85 so there's always at least 15% of the base cooldown left.
+  let gloveSpeed = 0;
+  if (S.glove) {
+    const g = GLOVES.find(x => x.id === S.glove);
+    if (g) gloveSpeed = g.speed || 0;
+  }
+  let potionSpeed = 0;
+  if (S.speedBuff && Date.now()/1000 < S.speedBuff.expires) {
+    potionSpeed = S.speedBuff.speed || 0;
+  } else {
+    S.speedBuff = null;
+  }
+  return Math.min(gloveSpeed + potionSpeed, 0.85);
+}
+
+function currentCooldownMs() {
+  return Math.round(BASE_COOLDOWN_MS * (1 - totalSpeed()));
+}
+
+function restartAutoIfRunning() {
+  if (S.autoSpeed) startAutoRoll();
+}
+
+function updateBuffBar() {
+  const wrap = document.getElementById('buff-bar-wrap');
+  const disp = document.getElementById('buff-display');
+  if (S.buff && Date.now()/1000 < S.buff.expires) {
+    const rem = S.buff.expires - Date.now()/1000;
+    const pct = rem / S.buff.secs * 100;
+    document.getElementById('buff-name').textContent = S.buff.label + ` ×${S.buff.mult}`;
+    document.getElementById('buff-time').textContent = Math.ceil(rem) + 's';
+    document.getElementById('buff-fill').style.width = pct + '%';
+    wrap.style.display = 'block';
+    disp.style.display = 'none';
+  } else {
+    if (S.buff) S.buff = null;
+    wrap.style.display = 'none';
+    disp.style.display = 'block';
+    disp.textContent = 'No luck potion active';
+  }
+
+  const speedWrap = document.getElementById('speed-bar-wrap');
+  const speedDisp = document.getElementById('speed-display');
+  if (S.speedBuff && Date.now()/1000 < S.speedBuff.expires) {
+    const rem = S.speedBuff.expires - Date.now()/1000;
+    const pct = rem / S.speedBuff.secs * 100;
+    document.getElementById('speed-buff-name').textContent = S.speedBuff.label + ` -${Math.round(S.speedBuff.speed*100)}% cd`;
+    document.getElementById('speed-buff-time').textContent = Math.ceil(rem) + 's';
+    document.getElementById('speed-buff-fill').style.width = pct + '%';
+    speedWrap.style.display = 'block';
+    speedDisp.style.display = 'none';
+  } else {
+    if (S.speedBuff) { S.speedBuff = null; restartAutoIfRunning(); }
+    speedWrap.style.display = 'none';
+    speedDisp.style.display = 'block';
+    speedDisp.textContent = 'No haste potion active';
+  }
+}
+
+function updateAutoStatus() {
+  const el = document.getElementById('auto-status');
+  if (!el) return;
+  if (S.autoSpeed > 0) {
+    const label = AUTO_SPEEDS.find(x=>x.ms===S.autoSpeed);
+    el.innerHTML = `Auto-rolling: <span class="progress">${label ? label.label : S.autoSpeed+'ms'}</span>`;
+  } else {
+    el.textContent = 'Auto-roll: off';
+  }
+}
+
+// Buff bar + auto status + automation tick
+setInterval(() => {
+  updateBuffBar();
+  updateAutoStatus();
+  updateBiomeBar();
+  if (S.testerMode) buildTesterBiomeBar();
+  runAutoSystems();
+  checkShopRestock();
+  // Update shop timer inline without full re-render
+  const timerEl = document.getElementById('shop-timer');
+  if (timerEl && S.shopNextRestock) {
+    const msLeft = Math.max(0, S.shopNextRestock - Date.now());
+    const minLeft = Math.floor(msLeft / 60000);
+    const secLeft = Math.floor((msLeft % 60000) / 1000);
+    timerEl.textContent = `${minLeft}:${String(secLeft).padStart(2,'0')}`;
+  }
+}, 500);
+
+// Biome spawn timer — small chance every minute
+setInterval(() => {
+  if (S.biome && Date.now()/1000 < S.biome.expires) return; // biome already active
+  const totalChance = BIOMES.reduce((s,b) => s + b.spawnChance, 0);
+  if (Math.random() < totalChance / BIOMES.length) {
+    // pick a biome weighted by spawnChance
+    let r = Math.random() * BIOMES.reduce((s,b)=>s+b.spawnChance,0);
+    for (const b of BIOMES) {
+      r -= b.spawnChance;
+      if (r <= 0) { spawnBiome(b.id); break; }
+    }
+  }
+}, 60000);
+
+// ── AURA ANIMATION ENGINE ─────────────────────────────────────────────────────
+// Fires for auras with 1-in-100000+ odds (Mythic & Divine tiers)
+let auraAnim = null;
+let auraAnimFrame = null;
+
+function hexToRgb(hex) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return {r,g,b};
+}
+
+function stopAuraAnim() {
+  if (auraAnimFrame) { cancelAnimationFrame(auraAnimFrame); auraAnimFrame = null; }
+  auraAnim = null;
+  const canvas = document.getElementById('aura-canvas');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+  }
+  const stage = document.getElementById('aura-stage');
+  if (stage) stage.style.boxShadow = '';
+}
+
+function startAuraAnim(color, tier) {
+  stopAuraAnim();
+  const canvas = document.getElementById('aura-canvas');
+  const stage = document.getElementById('aura-stage');
+  if (!canvas || !stage) return;
+
+  const ctx = canvas.getContext('2d');
+  const rgb = hexToRgb(color);
+  const isTranscendent = tier === 'TRANSCENDENT' || tier === 'GLORIOUS';
+  const isExalted = tier === 'EXALTED' || tier === 'MYTHIC';
+
+  // Particle configs per tier
+  const cfg = tier === 'TRANSCENDENT' ? {
+    orbitCount:5, particlesPerOrbit:32, sparkCount:110, rings:5, glowRadius:130, speed:1.0,
+  } : isTranscendent ? {
+    orbitCount:3, particlesPerOrbit:22, sparkCount:70, rings:3, glowRadius:95, speed:0.65,
+  } : tier === 'MYTHIC' ? {
+    orbitCount:3, particlesPerOrbit:18, sparkCount:55, rings:3, glowRadius:80, speed:0.6,
+  } : {
+    orbitCount:2, particlesPerOrbit:14, sparkCount:35, rings:2, glowRadius:65, speed:0.45,
+  };
+
+  // Build particles
+  const particles = [];
+  for (let o = 0; o < cfg.orbitCount; o++) {
+    const orbitRadius = 48 + o * 22;
+    const orbitSpeed = (cfg.speed * (1 - o*0.15)) * (o%2===0 ? 1 : -1);
+    for (let p = 0; p < cfg.particlesPerOrbit; p++) {
+      const angle = (p / cfg.particlesPerOrbit) * Math.PI * 2;
+      particles.push({
+        type: 'orbit',
+        angle,
+        orbitRadius,
+        orbitSpeed,
+        size: isTranscendent ? 2.5 - o*0.4 : 2 - o*0.3,
+        alpha: 0.7 + Math.random()*0.3,
+        trailLen: isTranscendent ? 8 : 5,
+        trail: [],
+      });
+    }
+  }
+
+  // Sparks (floating upward)
+  for (let i = 0; i < cfg.sparkCount; i++) {
+    particles.push({
+      type: 'spark',
+      x: (Math.random()-0.5)*180,
+      y: (Math.random()-0.5)*100,
+      vx: (Math.random()-0.5)*0.4,
+      vy: -(0.2 + Math.random()*0.6),
+      size: 0.8 + Math.random()*1.5,
+      alpha: 0.3 + Math.random()*0.5,
+      life: Math.random(),
+      maxLife: 0.8 + Math.random()*0.5,
+    });
+  }
+
+  let t = 0;
+  function loop() {
+    const W = stage.offsetWidth;
+    const H = stage.offsetHeight;
+    canvas.width = W; canvas.height = H;
+    const cx = W/2, cy = H/2;
+    ctx.clearRect(0,0,W,H);
+    t += 0.016;
+
+    // Outer glow rings
+    for (let ri = 0; ri < cfg.rings; ri++) {
+      const pulse = Math.sin(t * 1.8 + ri * 1.1) * 0.15 + 0.85;
+      const rr = (cfg.glowRadius * pulse) * (0.6 + ri*0.2);
+      const grad = ctx.createRadialGradient(cx,cy,rr*0.3, cx,cy,rr);
+      grad.addColorStop(0, `rgba(${rgb.r},${rgb.g},${rgb.b},${isTranscendent?0.12:0.08})`);
+      grad.addColorStop(1, `rgba(${rgb.r},${rgb.g},${rgb.b},0)`);
+      ctx.beginPath();
+      ctx.arc(cx, cy, rr, 0, Math.PI*2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+    }
+
+    // Transcendent/Glorious: rotating light beams
+    if (isTranscendent) {
+      const beamCount = tier === 'TRANSCENDENT' ? 10 : 6;
+      for (let b = 0; b < beamCount; b++) {
+        const bAngle = t*0.4 + (b/beamCount)*Math.PI*2;
+        const bLen = 70 + Math.sin(t*2+b)*15;
+        ctx.save();
+        ctx.translate(cx,cy);
+        ctx.rotate(bAngle);
+        const bg = ctx.createLinearGradient(0,0,bLen,0);
+        bg.addColorStop(0,`rgba(${rgb.r},${rgb.g},${rgb.b},${tier==='TRANSCENDENT'?0.28:0.18})`);
+        bg.addColorStop(1,`rgba(${rgb.r},${rgb.g},${rgb.b},0)`);
+        ctx.beginPath();
+        ctx.moveTo(0,-2); ctx.lineTo(bLen,0); ctx.lineTo(0,2);
+        ctx.fillStyle = bg;
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    // Exalted/Mythic: swirling energy wisps
+    if (isExalted) {
+      for (let w = 0; w < 3; w++) {
+        ctx.beginPath();
+        const wt = t*0.7 + w*(Math.PI*2/3);
+        for (let i = 0; i <= 40; i++) {
+          const a = (i/40)*Math.PI*4 + wt;
+          const r = (i/40)*50;
+          const wx = cx + Math.cos(a)*r;
+          const wy = cy + Math.sin(a)*r*0.5;
+          i===0 ? ctx.moveTo(wx,wy) : ctx.lineTo(wx,wy);
+        }
+        ctx.strokeStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},0.12)`;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+    }
+
+    // Special per-aura effects
+    const aurName = S.last ? S.last.name : '';
+    if (aurName === 'PRISMATIC') {
+      // Rainbow hue shift on particles
+      for (let ri2 = 0; ri2 < 3; ri2++) {
+        const hue2 = (t*60 + ri2*120) % 360;
+        const rr2 = 30 + ri2*18 + Math.sin(t*2+ri2)*8;
+        const grad2 = ctx.createRadialGradient(cx,cy,0, cx,cy,rr2);
+        grad2.addColorStop(0,`hsla(${hue2},100%,70%,0.13)`);
+        grad2.addColorStop(1,`hsla(${hue2},100%,70%,0)`);
+        ctx.beginPath(); ctx.arc(cx,cy,rr2,0,Math.PI*2);
+        ctx.fillStyle = grad2; ctx.fill();
+      }
+    }
+    if (aurName === 'THUNDERSTRIKE') {
+      // Lightning bolt sparks
+      if (Math.random() < 0.08) {
+        ctx.save();
+        ctx.strokeStyle = `rgba(200,220,255,0.7)`;
+        ctx.lineWidth = 1.5;
+        ctx.shadowBlur = 8; ctx.shadowColor = '#818cf8';
+        ctx.beginPath();
+        let lx = cx + (Math.random()-0.5)*60, ly = cy - 40;
+        ctx.moveTo(lx, ly);
+        for (let ls = 0; ls < 5; ls++) { lx += (Math.random()-0.5)*20; ly += 16; ctx.lineTo(lx, ly); }
+        ctx.stroke(); ctx.restore();
+      }
+    }
+    if (aurName === 'BLOODMOON') {
+      // Pulsing red moon ring
+      const bpulse = Math.sin(t*1.4)*0.15+0.85;
+      ctx.beginPath(); ctx.arc(cx, cy, 52*bpulse, 0, Math.PI*2);
+      ctx.strokeStyle = `rgba(239,68,68,0.18)`; ctx.lineWidth = 8; ctx.stroke();
+    }
+    if (aurName === 'DOOMBRINGER') {
+      // Spinning dark vortex lines
+      for (let dv = 0; dv < 5; dv++) {
+        const da = t*1.2 + dv*(Math.PI*2/5);
+        ctx.save(); ctx.translate(cx,cy); ctx.rotate(da);
+        const dg = ctx.createLinearGradient(0,0,60,0);
+        dg.addColorStop(0,`rgba(220,38,38,0.3)`); dg.addColorStop(1,`rgba(220,38,38,0)`);
+        ctx.beginPath(); ctx.moveTo(0,-1); ctx.lineTo(60,0); ctx.lineTo(0,1);
+        ctx.fillStyle = dg; ctx.fill(); ctx.restore();
+      }
+    }
+    if (aurName === 'GODSLAYER') {
+      // Intense cross beams
+      for (let gb = 0; gb < 4; gb++) {
+        const ga = t*0.5 + gb*(Math.PI/2);
+        ctx.save(); ctx.translate(cx,cy); ctx.rotate(ga);
+        const gg = ctx.createLinearGradient(0,0,90,0);
+        gg.addColorStop(0,`rgba(255,68,68,0.5)`); gg.addColorStop(1,`rgba(255,68,68,0)`);
+        ctx.beginPath(); ctx.moveTo(0,-3); ctx.lineTo(90,0); ctx.lineTo(0,3);
+        ctx.fillStyle = gg; ctx.fill(); ctx.restore();
+      }
+    }
+
+    // Orbit particles
+    particles.forEach(p => {
+      if (p.type === 'orbit') {
+        p.angle += p.orbitSpeed * 0.035;
+        const px = cx + Math.cos(p.angle)*p.orbitRadius;
+        const py = cy + Math.sin(p.angle)*p.orbitRadius*0.45; // elliptical
+
+        p.trail.push({x:px, y:py});
+        if (p.trail.length > p.trailLen) p.trail.shift();
+
+        // Trail
+        for (let ti = 0; ti < p.trail.length-1; ti++) {
+          const ta = (ti/p.trail.length)*p.alpha*0.5;
+          ctx.beginPath();
+          ctx.arc(p.trail[ti].x, p.trail[ti].y, p.size*(ti/p.trail.length)*0.8, 0, Math.PI*2);
+          ctx.fillStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${ta})`;
+          ctx.fill();
+        }
+
+        // Core dot
+        ctx.beginPath();
+        ctx.arc(px, py, p.size, 0, Math.PI*2);
+        ctx.fillStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${p.alpha})`;
+        ctx.fill();
+        // Glow
+        const dotGrad = ctx.createRadialGradient(px,py,0, px,py,p.size*3);
+        dotGrad.addColorStop(0,`rgba(${rgb.r},${rgb.g},${rgb.b},0.4)`);
+        dotGrad.addColorStop(1,`rgba(${rgb.r},${rgb.g},${rgb.b},0)`);
+        ctx.beginPath();
+        ctx.arc(px,py,p.size*3,0,Math.PI*2);
+        ctx.fillStyle = dotGrad;
+        ctx.fill();
+
+      } else if (p.type === 'spark') {
+        p.x += p.vx; p.y += p.vy;
+        p.life += 0.008;
+        const fade = Math.sin((p.life/p.maxLife)*Math.PI);
+        if (p.life >= p.maxLife) {
+          p.x = (Math.random()-0.5)*160;
+          p.y = (Math.random()-0.5)*80;
+          p.life = 0;
+          p.maxLife = 0.8+Math.random()*0.5;
+          p.vx = (Math.random()-0.5)*0.4;
+          p.vy = -(0.2+Math.random()*0.6);
+        }
+        ctx.beginPath();
+        ctx.arc(cx+p.x, cy+p.y, p.size*fade, 0, Math.PI*2);
+        ctx.fillStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${p.alpha*fade})`;
+        ctx.fill();
+      }
+    });
+
+    // Subtle stage box glow
+    const glowSize = tier === 'TRANSCENDENT' ? 60 : isTranscendent ? 40 : 24;
+    const glowAlpha = tier === 'TRANSCENDENT' ? 0.40 : isTranscendent ? 0.25 : 0.15;
+    stage.style.boxShadow = `0 0 ${glowSize}px rgba(${rgb.r},${rgb.g},${rgb.b},${glowAlpha}), inset 0 0 ${glowSize*0.7}px rgba(${rgb.r},${rgb.g},${rgb.b},0.06)`;
+
+    auraAnimFrame = requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+// ── BIOME SYSTEM ──────────────────────────────────────────────────────────────
+let biomeParticles = [];
+let biomeAnimFrame = null;
+
+function spawnBiome(id) {
+  const b = BIOME_MAP[id];
+  if (!b) return;
+  S.biome = { id, expires: Date.now()/1000 + b.duration };
+  logPush(`${b.icon} ${b.name} biome arrived! ${b.boosted.join(', ')} boosted!`, true);
+  toast(`${b.icon} ${b.name} — ${b.desc}`);
+  startBiomeVisual(b);
+  renderAll();
+}
+
+function stopBiomeVisual() {
+  if (biomeAnimFrame) { cancelAnimationFrame(biomeAnimFrame); biomeAnimFrame = null; }
+  biomeParticles = [];
+  document.documentElement.style.filter = '';
+  const ov = document.getElementById('biome-overlay');
+  if (ov) { ov.style.opacity = '0'; ov.style.background = 'transparent'; }
+  const pc = document.getElementById('biome-particles');
+  if (pc) { const ctx = pc.getContext('2d'); ctx.clearRect(0, 0, pc.width, pc.height); }
+}
+
+function startBiomeVisual(b) {
+  stopBiomeVisual();
+  // Screen hue filter
+  document.documentElement.style.filter = `hue-rotate(${b.hueShift * 0.18}deg) saturate(1.15)`;
+
+  // Build overlay element (persistent color wash)
+  let ov = document.getElementById('biome-overlay');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'biome-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2;transition:opacity 2s,background 2s;';
+    document.body.appendChild(ov);
+  }
+  ov.style.background = b.overlayColor;
+  ov.style.opacity = '1';
+
+  // Particle canvas
+  let pc = document.getElementById('biome-particles');
+  if (!pc) {
+    pc = document.createElement('canvas');
+    pc.id = 'biome-particles';
+    pc.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:3;width:100%;height:100%;';
+    document.body.appendChild(pc);
+  }
+  pc.width = window.innerWidth;
+  pc.height = window.innerHeight;
+
+  // Build particles by type
+  const W = pc.width, H = pc.height;
+  const col = b.particleColor;
+
+  function hexToRgb2(hex) {
+    const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+    return {r,g,b};
+  }
+  const rgb = hexToRgb2(col);
+
+  if (b.particleType === 'rain') {
+    for (let i=0; i<160; i++) biomeParticles.push({x:Math.random()*W,y:Math.random()*H,vy:14+Math.random()*8,vx:-2-Math.random()*2,len:18+Math.random()*22,a:0.25+Math.random()*0.45});
+  } else if (b.particleType === 'wind') {
+    for (let i=0; i<100; i++) biomeParticles.push({x:Math.random()*W,y:Math.random()*H,vx:9+Math.random()*10,vy:(Math.random()-0.5)*2,len:30+Math.random()*60,a:0.12+Math.random()*0.35,wave:Math.random()*Math.PI*2});
+  } else if (b.particleType === 'ember') {
+    for (let i=0; i<120; i++) biomeParticles.push({x:Math.random()*W,y:H*(0.5+Math.random()*0.5),vx:(Math.random()-0.5)*3,vy:-(2+Math.random()*5),size:1.5+Math.random()*3,a:0.7+Math.random()*0.3,life:Math.random()*0.5,maxLife:0.6+Math.random()*1.2});
+  } else if (b.particleType === 'void') {
+    for (let i=0; i<60; i++) biomeParticles.push({x:Math.random()*W,y:Math.random()*H,r:30+Math.random()*80,a:0.03+Math.random()*0.06,speed:0.002+Math.random()*0.004,angle:Math.random()*Math.PI*2,pulsed:Math.random()*Math.PI*2});
+  } else if (b.particleType === 'snow') {
+    for (let i=0; i<220; i++) biomeParticles.push({x:Math.random()*W,y:Math.random()*H,vy:4+Math.random()*6,vx:8+Math.random()*10,size:1.5+Math.random()*3.5,a:0.4+Math.random()*0.5,wave:Math.random()*Math.PI*2,waveAmp:Math.random()*2,t:Math.random()*100});
+  } else if (b.particleType === 'aurora') {
+    for (let i=0; i<8; i++) biomeParticles.push({band:i,offset:Math.random()*Math.PI*2,speed:0.003+Math.random()*0.005,a:0.06+Math.random()*0.1,width:80+Math.random()*180,hueOff:i*40});
+  }
+
+  let t = 0;
+  function loop() {
+    if (!S.biome) { stopBiomeVisual(); return; }
+    if (Date.now()/1000 >= S.biome.expires) { stopBiomeVisual(); return; }
+    pc.width = window.innerWidth; pc.height = window.innerHeight;
+    const W2 = pc.width, H2 = pc.height;
+    const ctx = pc.getContext('2d');
+    ctx.clearRect(0,0,W2,H2);
+    t += 0.016;
+
+    biomeParticles.forEach(p => {
+      if (b.particleType === 'rain') {
+        ctx.strokeStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${p.a})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p.x + p.vx * (p.len / p.vy), p.y + p.len);
+        ctx.stroke();
+        p.x += p.vx; p.y += p.vy;
+        if (p.y > H2+20) { p.y = -20; p.x = Math.random()*W2; }
+      } else if (b.particleType === 'wind') {
+        p.wave += 0.04;
+        ctx.strokeStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${p.a})`;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y + Math.sin(p.wave)*4);
+        ctx.bezierCurveTo(p.x+p.len/3, p.y+Math.sin(p.wave+1)*5, p.x+p.len*0.7, p.y+Math.sin(p.wave+2)*3, p.x+p.len, p.y+p.vy);
+        ctx.stroke();
+        p.x += p.vx; p.y += Math.sin(p.wave)*0.5;
+        if (p.x > W2+50) { p.x = -50; p.y = Math.random()*H2; }
+      } else if (b.particleType === 'ember') {
+        p.life += 0.018; p.x += p.vx; p.y += p.vy;
+        p.vx += (Math.random()-0.5)*0.3;
+        const fade = Math.sin((p.life/p.maxLife)*Math.PI);
+        if (p.life >= p.maxLife) { p.life=0; p.x=Math.random()*W2; p.y=H2*(0.4+Math.random()*0.6); p.vx=(Math.random()-0.5)*3; p.vy=-(2+Math.random()*5); }
+        const r0 = Math.max(0.01, p.size*fade);
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,r0,0,Math.PI*2);
+        ctx.fillStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${p.a*fade})`;
+        ctx.fill();
+        const glowR = Math.max(0.01, p.size*fade*4);
+        const glow = ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,glowR);
+        glow.addColorStop(0,`rgba(${rgb.r},${rgb.g},${rgb.b},${p.a*fade*0.4})`);
+        glow.addColorStop(1,`rgba(${rgb.r},${rgb.g},${rgb.b},0)`);
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,glowR,0,Math.PI*2);
+        ctx.fillStyle = glow;
+        ctx.fill();
+      } else if (b.particleType === 'void') {
+        p.angle += p.speed; p.pulsed += 0.02;
+        const pulse = 0.85 + Math.sin(p.pulsed)*0.15;
+        const grad = ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r*pulse);
+        grad.addColorStop(0,`rgba(${rgb.r},${rgb.g},${rgb.b},${p.a*2})`);
+        grad.addColorStop(1,`rgba(${rgb.r},${rgb.g},${rgb.b},0)`);
+        ctx.beginPath(); ctx.arc(p.x,p.y,p.r*pulse,0,Math.PI*2);
+        ctx.fillStyle = grad; ctx.fill();
+      } else if (b.particleType === 'snow') {
+        p.t += 0.06; p.y += p.vy; p.x += p.vx;
+        const wy = p.y + Math.sin(p.t)*p.waveAmp;
+        if (p.x > W2+20) { p.x=-20; p.y=Math.random()*H2; }
+        ctx.beginPath(); ctx.arc(p.x,wy,p.size,0,Math.PI*2);
+        ctx.fillStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${p.a})`; ctx.fill();
+      } else if (b.particleType === 'aurora') {
+        p.offset += p.speed;
+        const y = H2 * 0.2 + Math.sin(p.offset + p.band)*H2*0.12;
+        const grad = ctx.createLinearGradient(0,y-p.width/2,0,y+p.width/2);
+        const hue = (b.hueShift + p.hueOff + t*10) % 360;
+        grad.addColorStop(0,`hsla(${hue},100%,70%,0)`);
+        grad.addColorStop(0.5,`hsla(${hue},100%,70%,${p.a})`);
+        grad.addColorStop(1,`hsla(${hue},100%,70%,0)`);
+        ctx.fillStyle = grad;
+        ctx.fillRect(0,y-p.width/2,W2,p.width);
+      }
+    });
+
+    biomeAnimFrame = requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+function updateBiomeBar() {
+  const wrap = document.getElementById('biome-bar-wrap');
+  const disp = document.getElementById('biome-display');
+  if (!wrap || !disp) return;
+  if (S.biome) {
+    const b = BIOME_MAP[S.biome.id];
+    const now = Date.now()/1000;
+    const expired = now >= S.biome.expires;
+    if (expired) stopBiomeVisual();
+    const rem = Math.max(0, S.biome.expires - now);
+    const pct = expired ? 0 : rem / b.duration * 100;
+    document.getElementById('biome-name').textContent = `${b.icon} ${b.name}${expired ? ' — ended' : ''}`;
+    document.getElementById('biome-time').textContent = expired ? '0s' : Math.ceil(rem) + 's';
+    document.getElementById('biome-fill').style.width = pct + '%';
+    document.getElementById('biome-boosted').textContent = 'Boosted: ' + b.boosted.join(', ');
+    wrap.style.display = 'block';
+    disp.style.display = 'none';
+  } else {
+    wrap.style.display = 'none';
+    disp.style.display = 'block';
+  }
+}
+
+// ── RENDER ────────────────────────────────────────────────────────────────────
+function renderAll() {
+  renderStats();
+  renderLastRoll();
+  renderLog();
+  renderPotionGrid();
+  renderInvAuras();
+  renderInvPotions();
+  renderCollection();
+  renderCraft();
+  renderBank();
+  renderAuto();
+  renderSettings();
+  updateBuffBar();
+  updateBiomeBar();
+}
+
+function renderStats() {
+  const luck = totalLuck();
+  document.getElementById('stat-rolls').textContent = S.rolls;
+  const luckEl = document.getElementById('stat-luck');
+  if (S.testerMode) {
+    luckEl.textContent = '10,000,000x';
+    luckEl.style.color = '#ff50c8';
+  } else {
+    luckEl.textContent = luck + 'x';
+    luckEl.style.color = '';
+  }
+  const speedEl = document.getElementById('stat-speed');
+  if (S.testerMode) {
+    speedEl.textContent = 'instant';
+    speedEl.style.color = '#ff50c8';
+  } else {
+    const cdMs = currentCooldownMs();
+    const spd = totalSpeed();
+    speedEl.textContent = (cdMs/1000).toFixed(2) + 's' + (spd > 0 ? ` (-${Math.round(spd*100)}%)` : '');
+    speedEl.style.color = spd > 0 ? '#34d399' : '';
+  }
+  document.getElementById('stat-coins').textContent = S.coins;
+  document.getElementById('stat-found').textContent = `${Object.keys(S.invAuras).length}/${AURAS.length}`;
+  const g = S.glove ? GLOVES.find(x=>x.id===S.glove) : null;
+  document.getElementById('stat-glove').textContent = g ? g.name : 'none';
+  const rarest = getRarest();
+  if (rarest) {
+    const el = document.getElementById('stat-rarest');
+    el.textContent = rarest[1];
+    el.style.color = rarest[3];
+  } else {
+    document.getElementById('stat-rarest').textContent = '—';
+    document.getElementById('stat-rarest').style.color = '';
+  }
+  const biomeEl = document.getElementById('stat-biome');
+  if (S.biome) {
+    const b = BIOME_MAP[S.biome.id];
+    const expired = Date.now()/1000 >= S.biome.expires;
+    biomeEl.textContent = b.icon + ' ' + b.name + (expired ? ' ❄' : '');
+    document.body.classList.add('biome-active');
+  } else {
+    biomeEl.textContent = 'none';
+    document.body.classList.remove('biome-active');
+  }
+}
+
+function renderLastRoll() {
+  const nameEl = document.getElementById('roll-name');
+  const tierRow = document.getElementById('roll-tier-row');
+  const chanceEl = document.getElementById('roll-chance');
+  if (!S.last) return;
+  const {tier, name, chance, color, gilded} = S.last;
+  const luck = totalLuck();
+  const starHTML = STAR_AURAS.has(name) ? `<i class="aura-star" style="color:${color}">★</i>` : '';
+  nameEl.innerHTML = name + starHTML;
+  nameEl.style.color = color;
+  nameEl.style.textShadow = `0 0 30px ${color}66`;
+  nameEl.style.fontFamily = getAuraFont(name);
+
+  // Font tier based on base chance
+  nameEl.classList.remove('rare-font','transcendent-font');
+  if (chance <= 1/10000000) {
+    nameEl.classList.add('transcendent-font');
+  } else if (chance <= 1/1000) {
+    nameEl.classList.add('rare-font');
+  }
+
+  let tierHTML = `<span class="roll-tier-badge" style="color:${TIER_COLORS[tier]};border-color:${TIER_COLORS[tier]}44">${tier}</span>`;
+  if (gilded) tierHTML += `<span class="gilded-badge">✦ GILDED</span>`;
+  tierRow.innerHTML = tierHTML;
+  chanceEl.textContent = fmtChance(chance, luck);
+
+  // Aura animation: trigger for UNIQUE (1-in-10,000+) base odds
+  if (chance <= 1/10000 && S.settings.particleFX) {
+    startAuraAnim(color, tier);
+  } else {
+    stopAuraAnim();
+  }
+}
+
+function renderLog() {
+  const ul = document.getElementById('log-list');
+  ul.innerHTML = '';
+  [...S.log].reverse().slice(0,10).forEach(({msg, special}) => {
+    const li = document.createElement('li');
+    li.className = 'log-item' + (special ? ' special' : '');
+    li.textContent = msg;
+    ul.appendChild(li);
+  });
+}
+
+function renderPotionGrid() {
+  const el = document.getElementById('potion-grid');
+  el.innerHTML = '';
+  const activeLuck = S.buff && Date.now()/1000 < S.buff.expires;
+  const activeSpeed = S.speedBuff && Date.now()/1000 < S.speedBuff.expires;
+  POTIONS.forEach(p => {
+    const cnt = S.invPotions[p.id]||0;
+    const isActive = p.type === 'speed' ? (activeSpeed && S.speedBuff.id === p.id) : (activeLuck && S.buff.id === p.id);
+    const div = document.createElement('div');
+    div.className = 'potion-row' + (isActive ? ' active-potion' : '');
+    const statsText = p.type === 'speed'
+      ? `-${Math.round(p.speed*100)}% cooldown · ${p.secs}s`
+      : `+${Math.round((p.mult-1)*100)}% luck · ${p.secs}s`;
+    div.innerHTML = `
+      <span class="potion-icon">${p.icon}</span>
+      <div class="potion-info">
+        <div class="potion-name">${p.label}</div>
+        <div class="potion-stats">${statsText}</div>
+      </div>
+      <span class="potion-count ${cnt>0?'has-potions':''}">${isActive?'active':cnt+'×'}</span>
+      <button class="btn btn-sm" onclick="usePot('${p.id}')" ${isActive||cnt===0?'disabled':''}>Use</button>
+    `;
+    el.appendChild(div);
+  });
+}
+
+function renderInvAuras() {
+  const el = document.getElementById('inv-auras');
+  el.innerHTML = '';
+  if (Object.keys(S.invAuras).length === 0) {
+    el.innerHTML = '<div style="color:var(--text-dim);font-size:0.7rem;padding:1rem 0">No auras yet — go roll!</div>';
+    return;
+  }
+  [...TIER_ORDER].reverse().forEach(tier => {
+    const items = AURAS.filter(a => a[0]===tier && S.invAuras[a[1]]);
+    if (!items.length) return;
+    const group = document.createElement('div');
+    group.className = 'inv-tier-group';
+    const label = document.createElement('div');
+    label.className = 'inv-tier-label';
+    label.style.color = TIER_COLORS[tier];
+    label.textContent = tier;
+    group.appendChild(label);
+    const chips = document.createElement('div');
+    chips.className = 'inv-aura-chips';
+    items.forEach(([,name,,color]) => {
+      const cnt = S.invAuras[name]||0;
+      const chip = document.createElement('div');
+      chip.className = 'aura-chip';
+      chip.style.color = color;
+      chip.style.borderColor = color + '44';
+      chip.style.background = color + '11';
+      chip.innerHTML = `${name} <span class="chip-count">×${cnt}</span>`;
+      chips.appendChild(chip);
+    });
+    group.appendChild(chips);
+    el.appendChild(group);
+  });
+}
+
+function renderInvPotions() {
+  const el = document.getElementById('inv-potions');
+  el.innerHTML = '';
+  const hasPots = POTIONS.some(p => (S.invPotions[p.id]||0) > 0);
+  if (!hasPots) {
+    el.innerHTML = '<div style="color:var(--text-dim);font-size:0.7rem;padding:1rem 0">No potions — buy from the Bank!</div>';
+    return;
+  }
+  POTIONS.forEach(p => {
+    const cnt = S.invPotions[p.id]||0;
+    if (!cnt) return;
+    const statsText = p.type === 'speed'
+      ? `-${Math.round(p.speed*100)}% cooldown · ${p.secs}s`
+      : `+${Math.round((p.mult-1)*100)}% luck · ${p.secs}s`;
+    const row = document.createElement('div');
+    row.className = 'potion-row';
+    row.innerHTML = `<span class="potion-icon">${p.icon}</span>
+      <div class="potion-info"><div class="potion-name">${p.label}</div>
+      <div class="potion-stats">${statsText}</div></div>
+      <span class="potion-count has-potions">×${cnt}</span>`;
+    el.appendChild(row);
+  });
+}
+
+function renderCraft() {
+  const el = document.getElementById('craft-grid');
+  el.innerHTML = '';
+  GLOVES.forEach(g => {
+    const owned = S.crafted.includes(g.id);
+    const equipped = S.glove === g.id;
+    const craftable = !owned && canCraft(g);
+    const div = document.createElement('div');
+    div.className = 'craft-item' + (equipped?' equipped':owned?' owned':craftable?' craftable':'');
+    let badge = '';
+    if (equipped) badge = '<span class="craft-badge equipped-badge">Equipped</span>';
+    else if (owned) badge = '<span class="craft-badge owned-badge">Owned</span>';
+    const matsHTML = Object.entries(g.recipe).map(([mat,qty]) => {
+      const have = S.invAuras[mat]||0;
+      const ok = have >= qty;
+      return `<span class="mat-chip ${ok?'ok':'missing'}">${mat} ${have}/${qty}</span>`;
+    }).join('');
+    let actionBtn = '';
+    if (owned && !equipped) actionBtn = `<button class="btn btn-sm btn-gold" onclick="equipGlove('${g.id}')">Equip</button>`;
+    else if (craftable) actionBtn = `<button class="btn btn-sm btn-primary" onclick="craftGlove('${g.id}')">Craft</button>`;
+    div.innerHTML = `
+      <div class="craft-item-header">
+        <div><span class="craft-name">${g.name}</span> <span class="craft-desc" style="margin-left:0.5rem">${g.desc}</span></div>
+        ${badge}
+      </div>
+      <div class="craft-mats">${matsHTML}</div>
+      ${actionBtn}
+    `;
+    el.appendChild(div);
+  });
+}
+
+function renderBank() {
+  // tier coins
+  const tcEl = document.getElementById('tier-coin-grid');
+  tcEl.innerHTML = '';
+  TIER_ORDER.forEach(tier => {
+    const c = TIER_COINS[tier];
+    if (!c) return;
+    const row = document.createElement('div');
+    row.className = 'tier-coin-row';
+    row.innerHTML = `<span class="tier-name" style="color:${TIER_COLORS[tier]}">${tier}</span><span class="coin-val">${c}c</span>`;
+    tcEl.appendChild(row);
+  });
+  // shop
+  initShopStock();
+  const shopEl = document.getElementById('shop-grid');
+  shopEl.innerHTML = '';
+
+  // Restock timer row
+  const msLeft = Math.max(0, S.shopNextRestock - Date.now());
+  const minLeft = Math.floor(msLeft / 60000);
+  const secLeft = Math.floor((msLeft % 60000) / 1000);
+  const timerRow = document.createElement('div');
+  timerRow.className = 'shop-restock-row';
+  timerRow.innerHTML = `<span>Next restock</span><span class="shop-restock-timer" id="shop-timer">${minLeft}:${String(secLeft).padStart(2,'0')}</span>`;
+  shopEl.appendChild(timerRow);
+
+  SHOP_POTIONS.forEach((sp,i) => {
+    const p = POTION_MAP[sp.id];
+    const stock = S.shopStock[sp.id] || 0;
+    const canBuy = S.coins >= sp.coinCost && stock > 0;
+    const owned = S.invPotions[sp.id]||0;
+    const div = document.createElement('div');
+    div.className = 'shop-item';
+    const statsText = p.type === 'speed'
+      ? `-${Math.round(p.speed*100)}% cooldown · ${p.secs}s · have: ${owned}`
+      : `+${Math.round((p.mult-1)*100)}% luck · ${p.secs}s · have: ${owned}`;
+    const stockClass = stock === 0 ? 'out-stock' : stock <= 2 ? 'low-stock' : 'in-stock';
+    const stockLabel = stock === 0 ? 'sold out' : `stock: ${stock}`;
+    div.innerHTML = `
+      <span style="font-size:1.2rem">${p.icon}</span>
+      <div class="shop-item-info">
+        <div class="shop-item-name">${sp.label}</div>
+        <div class="shop-item-stats">${statsText}</div>
+      </div>
+      <span class="shop-stock-badge ${stockClass}">${stockLabel}</span>
+      <button class="shop-item-cost" onclick="buyPotion('${sp.id}',${sp.coinCost})" ${canBuy?'':'disabled'}>
+        ${sp.coinCost}c
+      </button>
+    `;
+    shopEl.appendChild(div);
+  });
+}
+
+function renderAuto() {
+  // Update the auto-roll toggle in settings panel
+  const tog = document.getElementById('auto-roll-toggle');
+  const lbl = document.getElementById('auto-roll-toggle-label');
+  if (tog) { tog.classList.toggle('on', S.autoSpeed > 0); }
+  if (lbl) { lbl.textContent = S.autoSpeed > 0 ? 'ON' : 'OFF'; }
+  updateAutoStatus();
+}
+
+function toggleAutoRoll() {
+  if (S.autoSpeed > 0) {
+    setAutoSpeed(0);
+  } else {
+    setAutoSpeed(800);
+  }
+}
+
+// ── ACTIONS ───────────────────────────────────────────────────────────────────
+function canCraft(g) {
+  return Object.entries(g.recipe).every(([m,q]) => (S.invAuras[m]||0) >= q);
+}
+function craftGlove(id) {
+  const g = GLOVES.find(x=>x.id===id);
+  if (!g || !canCraft(g) || S.crafted.includes(id)) return;
+  for (const [m,q] of Object.entries(g.recipe)) {
+    S.invAuras[m] -= q;
+    if (!S.invAuras[m]) delete S.invAuras[m];
+  }
+  S.crafted.push(id);
+  S.glove = id;
+  logPush(`Crafted & equipped ${g.name}!`, true);
+  toast(`✓ ${g.name} crafted!`);
+  renderAll();
+}
+function equipGlove(id) {
+  S.glove = id;
+  const g = GLOVES.find(x=>x.id===id);
+  logPush(`Equipped ${g.name}`, true);
+  renderAll();
+}
+function unequipGlove() {
+  S.glove = null;
+  logPush('Glove unequipped');
+  renderAll();
+}
+function buyPotion(id, cost) {
+  initShopStock();
+  const stock = S.shopStock[id] || 0;
+  if (stock <= 0) { toast('Out of stock — check back after restock!'); return; }
+  if (S.coins < cost) { toast('Not enough coins!'); return; }
+  S.coins -= cost;
+  S.shopStock[id] = stock - 1;
+  S.invPotions[id] = (S.invPotions[id]||0) + 1;
+  const p = POTION_MAP[id];
+  logPush(`Bought ${p.label}! (-${cost}c)`, true);
+  toast(`✓ ${p.label} added to bag`);
+  renderAll();
+}
+function toggleQuick() {
+  S.quickRoll = !S.quickRoll;
+  const btn = document.getElementById('quick-btn');
+  btn.textContent = `⚡ Quick: ${S.quickRoll?'ON':'OFF'}`;
+  btn.classList.toggle('active', S.quickRoll);
+}
+function getRarest() {
+  let best=null, bi=-1;
+  for (const name of Object.keys(S.invAuras)) {
+    const a = AURA_MAP[name];
+    if (!a) continue;
+    const i = TIER_ORDER.indexOf(a[0]);
+    if (i > bi) { bi=i; best=a; }
+  }
+  return best;
+}
+
+
+// ── SETTINGS ─────────────────────────────────────────────────────────────────
+const LOG_FILTER_DEFS = [
+  { key:'crude',        label:'Crude',       tiers:['CRUDE'] },
+  { key:'scarce',       label:'Scarce',      tiers:['SCARCE'] },
+  { key:'uncommon',     label:'Uncommon',    tiers:['UNCOMMON'] },
+  { key:'common',       label:'Common',      tiers:['COMMON'] },
+  { key:'epic',         label:'Epic',        tiers:['EPIC'] },
+  { key:'unique',       label:'Unique',      tiers:['UNIQUE'] },
+  { key:'legendary',    label:'Legendary',   tiers:['LEGENDARY'] },
+  { key:'mythic',       label:'Mythic',      tiers:['MYTHIC'] },
+  { key:'exalted',      label:'Exalted',     tiers:['EXALTED'] },
+  { key:'glorious',     label:'Glorious',    tiers:['GLORIOUS'] },
+  { key:'transcendent', label:'Transcend',   tiers:['TRANSCENDENT'] },
+  { key:'gilded',       label:'Gilded',      tiers:[] },
+  { key:'special',      label:'Events',      tiers:[] },
+];
+
+function logAllowedForTier(tier, isSpecial, isGilded) {
+  const lf = S.settings.logFilter;
+  if (isGilded && !lf.gilded) return false;
+  if (isSpecial && !lf.special) return false;
+  if (tier) {
+    const key = tier.toLowerCase();
+    if (key in lf && !lf[key]) return false;
+  }
+  return true;
+}
+
+function toggleSetting(key) {
+  S.settings[key] = !S.settings[key];
+  renderSettings();
+  // side effects
+  if (key === 'autoBuyPotions') {
+    document.getElementById('auto-buy-detail').style.display = S.settings.autoBuyPotions ? 'block' : 'none';
+  }
+}
+
+function toggleQuickFromSettings() {
+  S.quickRoll = !S.quickRoll;
+  const btn = document.getElementById('quick-btn');
+  if (btn) { btn.textContent = `⚡ Quick: ${S.quickRoll?'ON':'OFF'}`; btn.classList.toggle('active', S.quickRoll); }
+  renderSettings();
+}
+
+function toggleLogFilter(key) {
+  S.settings.logFilter[key] = !S.settings.logFilter[key];
+  renderSettings();
+}
+
+function setToggle(id, on) {
+  const t = document.getElementById('tog-'+id);
+  const l = document.getElementById('togl-'+id);
+  if (t) t.classList.toggle('on', on);
+  if (l) l.textContent = on ? 'ON' : 'OFF';
+}
+
+function renderSettings() {
+  // simple toggles
+  setToggle('autoUseLuck',    S.settings.autoUseLuck);
+  setToggle('autoUseHaste',   S.settings.autoUseHaste);
+  setToggle('autoBuyPotions', S.settings.autoBuyPotions);
+  setToggle('flashOnRare',    S.settings.flashOnRare);
+  setToggle('particleFX',     S.settings.particleFX);
+  setToggle('quickRoll',      S.quickRoll);
+
+  // auto-buy detail
+  const detail = document.getElementById('auto-buy-detail');
+  if (detail) detail.style.display = S.settings.autoBuyPotions ? 'block' : 'none';
+
+  // auto-buy grid
+  const abg = document.getElementById('auto-buy-grid');
+  if (abg) {
+    abg.innerHTML = '';
+    SHOP_POTIONS.forEach(sp => {
+      const p = POTION_MAP[sp.id];
+      const target = S.settings.autoBuyTargets[sp.id] || 0;
+      const have = S.invPotions[sp.id] || 0;
+      const row = document.createElement('div');
+      row.className = 'auto-pot-row';
+      const statsText = p.type === 'speed'
+        ? `-${Math.round(p.speed*100)}% cd`
+        : `+${Math.round((p.mult-1)*100)}% luck`;
+      row.innerHTML = `
+        <span class="auto-pot-icon">${p.icon}</span>
+        <div class="auto-pot-info">
+          <div class="auto-pot-name">${p.label}</div>
+          <div class="auto-pot-desc">${statsText} · ${sp.coinCost}c ea · have: ${have}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.35rem;flex-shrink:0">
+          <button class="btn btn-sm" style="padding:0.2rem 0.55rem;font-size:0.6rem" onclick="adjustBuyTarget('${sp.id}',-1)">−</button>
+          <span style="font-size:0.62rem;color:var(--text-bright);min-width:1.2rem;text-align:center">${target}</span>
+          <button class="btn btn-sm" style="padding:0.2rem 0.55rem;font-size:0.6rem" onclick="adjustBuyTarget('${sp.id}',1)">+</button>
+        </div>
+      `;
+      abg.appendChild(row);
+    });
+  }
+
+  // log filter chips
+  const chipEl = document.getElementById('log-filter-chips');
+  if (chipEl) {
+    chipEl.innerHTML = '';
+    LOG_FILTER_DEFS.forEach(def => {
+      const on = S.settings.logFilter[def.key];
+      const btn = document.createElement('button');
+      btn.className = 'log-chip' + (on ? ' active' : '');
+      btn.textContent = def.label;
+      if (on && def.tiers[0] && TIER_COLORS[def.tiers[0]]) btn.style.borderColor = TIER_COLORS[def.tiers[0]] + '66';
+      btn.onclick = () => toggleLogFilter(def.key);
+      chipEl.appendChild(btn);
+    });
+  }
+}
+
+function adjustBuyTarget(id, delta) {
+  S.settings.autoBuyTargets[id] = Math.max(0, Math.min(20, (S.settings.autoBuyTargets[id]||0) + delta));
+  renderSettings();
+}
+
+// ── AURA DETAIL MODAL ────────────────────────────────────────────────────────
+let auraModalAnim = null;
+let auraModalData = null; // { tier, name, chance, color, gc, cnt }
+
+function openAuraModal(tier, name, chance, color, gc) {
+  const cnt = S.invAuras[name] || 0;
+  if (!cnt) return;
+  auraModalData = { tier, name, chance, color, gc, cnt };
+  document.getElementById('aura-modal').classList.add('open');
+  populateAuraModal(false);
+}
+
+function closeAuraModal() {
+  document.getElementById('aura-modal').classList.remove('open');
+  stopAuraModalAnim();
+  auraModalData = null;
+}
+
+async function populateAuraModal(animate) {
+  if (!auraModalData) return;
+  const { tier, name, chance, color, gc, cnt } = auraModalData;
+
+  const nameEl = document.getElementById('aura-modal-name');
+  const tierEl = document.getElementById('aura-modal-tier');
+  const chanceEl = document.getElementById('aura-modal-chance');
+  const gildedEl = document.getElementById('aura-modal-gilded');
+  const countEl = document.getElementById('aura-modal-count');
+  const replayBtn = document.getElementById('aura-modal-replay-btn');
+
+  // Stop existing anim
+  stopAuraModalAnim();
+
+  const isRare = chance <= 1/100000;
+
+  if (animate && isRare) {
+    // Slot-machine flicker
+    nameEl.classList.add('animate');
+    nameEl.classList.remove('rare-font', 'transcendent-font');
+    nameEl.style.color = 'var(--text-dim)';
+    nameEl.style.fontFamily = "'DM Mono', monospace";
+    for (let i = 0; i < 14; i++) {
+      const fake = AURAS[Math.floor(Math.random() * AURAS.length)];
+      nameEl.textContent = fake[1];
+      nameEl.style.color = fake[3];
+      nameEl.style.fontFamily = getAuraFont(fake[1]);
+      await sleep(100);
+    }
+    nameEl.classList.remove('animate');
+    if (S.settings.flashOnRare) flashScreen(color);
+  }
+
+  nameEl.textContent = name;
+  nameEl.style.color = color;
+  nameEl.style.textShadow = `0 0 30px ${color}66`;
+  nameEl.style.fontFamily = getAuraFont(name);
+  nameEl.classList.remove('rare-font', 'transcendent-font');
+  if (chance <= 1/10000000) nameEl.classList.add('transcendent-font');
+  else if (chance <= 1/1000) nameEl.classList.add('rare-font');
+
+  const starHTML = STAR_AURAS.has(name) ? `<i class="aura-star" style="color:${color}">★</i>` : '';
+  nameEl.innerHTML = name + starHTML;
+  nameEl.style.color = color;
+  nameEl.style.fontFamily = getAuraFont(name);
+
+  tierEl.textContent = tier;
+  tierEl.style.color = TIER_COLORS[tier] || color;
+  chanceEl.textContent = fmtChance(chance, 1);
+  gildedEl.style.display = gc > 0 ? 'inline' : 'none';
+  countEl.textContent = `×${cnt} collected`;
+  replayBtn.style.display = isRare ? 'inline' : 'none';
+
+  // Stage background tint
+  const stage = document.getElementById('aura-modal-stage');
+  stage.style.background = `radial-gradient(ellipse at center, ${color}18 0%, transparent 70%)`;
+
+  // Particle anim for 1-in-10k+
+  if (chance <= 1/10000 && S.settings.particleFX) {
+    startAuraModalAnim(color, tier);
+  }
+}
+
+async function replayAuraModal() {
+  if (!auraModalData) return;
+  const { tier, name, chance, color, gc } = auraModalData;
+  const fakeResult = { tier, name, chance, color, gilded: false };
+  closeAuraModal();
+  await sleep(100);
+  await playCutscene(fakeResult);
+}
+
+function stopAuraModalAnim() {
+  if (auraModalAnim) { cancelAnimationFrame(auraModalAnim); auraModalAnim = null; }
+  const canvas = document.getElementById('aura-modal-canvas');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+}
+
+function startAuraModalAnim(color, tier) {
+  stopAuraModalAnim();
+  const canvas = document.getElementById('aura-modal-canvas');
+  const stage = document.getElementById('aura-modal-stage');
+  if (!canvas || !stage) return;
+
+  const ctx = canvas.getContext('2d');
+  const rgb = hexToRgb(color);
+  const isTranscendent = tier === 'TRANSCENDENT' || tier === 'GLORIOUS';
+  const isExalted = tier === 'EXALTED' || tier === 'MYTHIC';
+
+  const cfg = tier === 'TRANSCENDENT' ? {
+    orbitCount:5, particlesPerOrbit:32, sparkCount:110, rings:5, glowRadius:130, speed:1.0,
+  } : isTranscendent ? {
+    orbitCount:3, particlesPerOrbit:22, sparkCount:70, rings:3, glowRadius:95, speed:0.65,
+  } : tier === 'MYTHIC' ? {
+    orbitCount:3, particlesPerOrbit:18, sparkCount:55, rings:3, glowRadius:80, speed:0.6,
+  } : {
+    orbitCount:2, particlesPerOrbit:14, sparkCount:35, rings:2, glowRadius:65, speed:0.45,
+  };
+
+  const particles = [];
+  for (let o = 0; o < cfg.orbitCount; o++) {
+    const orbitRadius = 48 + o * 22;
+    const orbitSpeed = (cfg.speed * (1 - o*0.15)) * (o%2===0 ? 1 : -1);
+    for (let p = 0; p < cfg.particlesPerOrbit; p++) {
+      const angle = (p / cfg.particlesPerOrbit) * Math.PI * 2;
+      particles.push({ type:'orbit', angle, orbitRadius, orbitSpeed, size: isTranscendent ? 2.5-o*0.4 : 2-o*0.3, alpha:0.7+Math.random()*0.3, trail:[] });
+    }
+  }
+  for (let i = 0; i < cfg.sparkCount; i++) {
+    particles.push({ type:'spark', x:(Math.random()-0.5)*180, y:(Math.random()-0.5)*100, vx:(Math.random()-0.5)*0.4, vy:-(0.2+Math.random()*0.6), size:0.8+Math.random()*1.5, alpha:0.3+Math.random()*0.5, life:Math.random(), maxLife:0.8+Math.random()*0.5 });
+  }
+
+  let t = 0;
+  function loop() {
+    const W = stage.offsetWidth, H = stage.offsetHeight;
+    canvas.width = W; canvas.height = H;
+    const cx = W/2, cy = H/2;
+    ctx.clearRect(0,0,W,H);
+    t += 0.016;
+
+    for (let ri = 0; ri < cfg.rings; ri++) {
+      const pulse = Math.sin(t*1.8+ri*1.1)*0.15+0.85;
+      const rr = (cfg.glowRadius*pulse)*(0.6+ri*0.2);
+      const grad = ctx.createRadialGradient(cx,cy,rr*0.3,cx,cy,rr);
+      grad.addColorStop(0,`rgba(${rgb.r},${rgb.g},${rgb.b},${isTranscendent?0.12:0.08})`);
+      grad.addColorStop(1,`rgba(${rgb.r},${rgb.g},${rgb.b},0)`);
+      ctx.beginPath(); ctx.arc(cx,cy,rr,0,Math.PI*2); ctx.fillStyle=grad; ctx.fill();
+    }
+
+    if (isTranscendent) {
+      const beamCount = tier==='TRANSCENDENT'?10:6;
+      for (let b=0;b<beamCount;b++) {
+        const bAngle=t*0.4+(b/beamCount)*Math.PI*2;
+        const bLen=70+Math.sin(t*2+b)*15;
+        ctx.save(); ctx.translate(cx,cy); ctx.rotate(bAngle);
+        const bg=ctx.createLinearGradient(0,0,bLen,0);
+        bg.addColorStop(0,`rgba(${rgb.r},${rgb.g},${rgb.b},${tier==='TRANSCENDENT'?0.28:0.18})`);
+        bg.addColorStop(1,`rgba(${rgb.r},${rgb.g},${rgb.b},0)`);
+        ctx.beginPath(); ctx.moveTo(0,-2); ctx.lineTo(bLen,0); ctx.lineTo(0,2);
+        ctx.fillStyle=bg; ctx.fill(); ctx.restore();
+      }
+    }
+
+    if (isExalted) {
+      for (let w=0;w<3;w++) {
+        ctx.beginPath();
+        const wt=t*0.7+w*(Math.PI*2/3);
+        for (let i=0;i<=40;i++) {
+          const a=(i/40)*Math.PI*4+wt, r=(i/40)*50;
+          const wx=cx+Math.cos(a)*r, wy=cy+Math.sin(a)*r*0.5;
+          i===0?ctx.moveTo(wx,wy):ctx.lineTo(wx,wy);
+        }
+        ctx.strokeStyle=`rgba(${rgb.r},${rgb.g},${rgb.b},0.15)`; ctx.lineWidth=1.5; ctx.stroke();
+      }
+    }
+
+    particles.forEach(p => {
+      if (p.type==='orbit') {
+        p.angle += p.orbitSpeed*0.025;
+        const px=cx+Math.cos(p.angle)*p.orbitRadius;
+        const py=cy+Math.sin(p.angle)*p.orbitRadius*0.55;
+        ctx.beginPath(); ctx.arc(px,py,p.size,0,Math.PI*2);
+        ctx.fillStyle=`rgba(${rgb.r},${rgb.g},${rgb.b},${p.alpha})`; ctx.fill();
+        const glow=ctx.createRadialGradient(px,py,0,px,py,p.size*4);
+        glow.addColorStop(0,`rgba(${rgb.r},${rgb.g},${rgb.b},0.3)`);
+        glow.addColorStop(1,`rgba(${rgb.r},${rgb.g},${rgb.b},0)`);
+        ctx.beginPath(); ctx.arc(px,py,p.size*4,0,Math.PI*2); ctx.fillStyle=glow; ctx.fill();
+      } else {
+        p.life+=0.008; p.x+=p.vx; p.y+=p.vy;
+        if (p.life>=p.maxLife){p.life=0;p.x=(Math.random()-0.5)*180;p.y=(Math.random()-0.5)*100;}
+        const fade=Math.sin((p.life/p.maxLife)*Math.PI);
+        ctx.beginPath(); ctx.arc(cx+p.x,cy+p.y,Math.max(0.1,p.size*fade),0,Math.PI*2);
+        ctx.fillStyle=`rgba(${rgb.r},${rgb.g},${rgb.b},${p.alpha*fade})`; ctx.fill();
+      }
+    });
+
+    auraModalAnim = requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+// Close on overlay click
+document.getElementById('aura-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeAuraModal();
+});
+
+function resetGame() {
+  document.getElementById('reset-modal').classList.add('open');
+}
+function closeResetModal() {
+  document.getElementById('reset-modal').classList.remove('open');
+}
+function confirmReset() {
+  closeResetModal();
+  localStorage.removeItem('beff_rng_v1');
+  location.reload();
+}
+// Close modal on overlay click
+document.getElementById('reset-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeResetModal();
+});
+
+// ── AUTO POTION / AUTO BUY ENGINE ────────────────────────────────────────────
+function runAutoSystems() {
+  const now = Date.now()/1000;
+
+  // Auto-use luck potion
+  if (S.settings.autoUseLuck && (!S.buff || now >= S.buff.expires)) {
+    // try Grand → Major → Minor
+    for (const id of ['g','j','m']) {
+      if ((S.invPotions[id]||0) > 0) { usePot(id); break; }
+    }
+  }
+
+  // Auto-use haste potion
+  if (S.settings.autoUseHaste && (!S.speedBuff || now >= S.speedBuff.expires)) {
+    for (const id of ['sg','sj','sm']) {
+      if ((S.invPotions[id]||0) > 0) { usePot(id); break; }
+    }
+  }
+
+  // Auto-buy potions
+  if (S.settings.autoBuyPotions) {
+    initShopStock();
+    for (const sp of SHOP_POTIONS) {
+      const target = S.settings.autoBuyTargets[sp.id] || 0;
+      const have = S.invPotions[sp.id] || 0;
+      const stock = S.shopStock[sp.id] || 0;
+      if (have < target && S.coins >= sp.coinCost && stock > 0) {
+        buyPotion(sp.id, sp.coinCost);
+      }
+    }
+  }
+}
+
+// ── COLLECTION ────────────────────────────────────────────────────────────────
+let colFilter = 'ALL';
+function setColFilter(f) {
+  colFilter = f;
+  renderCollection();
+}
+
+function renderCollection() {
+  const found = Object.keys(S.invAuras).length;
+  const total = AURAS.length;
+  document.getElementById('col-found').textContent = found;
+  document.getElementById('col-total').textContent = total;
+  document.getElementById('col-bar').style.width = (found/total*100) + '%';
+
+  // Filters
+  const filterEl = document.getElementById('col-filters');
+  filterEl.innerHTML = '';
+  const filterOpts = ['ALL', ...TIER_ORDER.slice().reverse(), 'UNDISCOVERED'];
+  filterOpts.forEach(f => {
+    const btn = document.createElement('button');
+    btn.className = 'col-filter-btn' + (colFilter===f?' active':'');
+    btn.textContent = f;
+    if (TIER_COLORS[f]) btn.style.color = colFilter===f ? TIER_COLORS[f] : '';
+    btn.onclick = () => setColFilter(f);
+    filterEl.appendChild(btn);
+  });
+
+  const content = document.getElementById('col-content');
+  content.innerHTML = '';
+
+  const tiersToShow = colFilter === 'ALL' || colFilter === 'UNDISCOVERED'
+    ? [...TIER_ORDER].reverse()
+    : [colFilter];
+
+  tiersToShow.forEach(tier => {
+    let auras = AURAS.filter(a => a[0] === tier);
+    if (colFilter === 'UNDISCOVERED') {
+      auras = AURAS.filter(a => !S.invAuras[a[1]]);
+    }
+    if (!auras.length) return;
+
+    const group = document.createElement('div');
+    group.className = 'collection-tier-group';
+
+    const tierFound = auras.filter(a => S.invAuras[a[1]]).length;
+    const label = document.createElement('div');
+    label.className = 'collection-tier-label';
+    label.style.color = TIER_COLORS[tier] || 'var(--text-dim)';
+    label.innerHTML = `${tier} <span class="tier-found">${colFilter==='UNDISCOVERED'?'?':tierFound+'/'+auras.length}</span>`;
+    group.appendChild(label);
+
+    const grid = document.createElement('div');
+    grid.className = 'collection-grid';
+
+    auras.forEach(([t, name, chance, color, gc]) => {
+      const cnt = S.invAuras[name] || 0;
+      const disc = cnt > 0;
+      const card = document.createElement('div');
+      const isTranscendent = t === 'TRANSCENDENT';
+      card.className = 'col-card ' + (disc ? 'discovered' : 'undiscovered') + (isTranscendent ? ' transcendent-card' : '');
+      if (disc) {
+        card.style.color = color;
+        card.onclick = () => openAuraModal(t, name, chance, color, gc);
+      }
+      if (isTranscendent && disc) {
+        card.style.borderColor = color;
+        card.style.background = `linear-gradient(135deg, ${color}0a, transparent)`;
+      }
+      const chanceStr = fmtChance(chance, 1); // always show base rarity
+      const gildedDot = (gc > 0 && disc) ? '<span class="col-gilded-dot" title="Gilded possible"></span>' : '';
+      const newBadge = disc && cnt === 1 ? '<span class="col-card-new">NEW</span>' : '';
+      const auraFont = disc ? getAuraFont(name) : "'DM Mono', monospace";
+      const fontStyle = `font-family:${auraFont}`;
+      const starBadge = '';
+      if (isTranscendent) {
+        card.innerHTML = `
+          ${newBadge}
+          <div class="col-card-name" style="${fontStyle}">${disc ? name : '???'}${starBadge}${gildedDot}</div>
+          <div class="col-card-info">
+            <span class="col-rarity-full">${chanceStr}</span>
+            ${disc ? `<span class="col-card-count">×${cnt}</span>` : ''}
+          </div>
+        `;
+      } else {
+        card.innerHTML = `
+          ${newBadge}
+          <div class="col-card-name" style="${fontStyle}">${disc ? name : '???'}${starBadge}${gildedDot}</div>
+          <div class="col-card-info">
+            <span>${disc ? chanceStr : '???'}</span>
+            ${disc ? `<span class="col-card-count">×${cnt}</span>` : ''}
+          </div>
+        `;
+      }
+      grid.appendChild(card);
+    });
+
+    group.appendChild(grid);
+    content.appendChild(group);
+  });
+}
+
+// ── PANELS & TABS ─────────────────────────────────────────────────────────────
+let currentPanel = 'roll';
+function setPanel(p) {
+  document.querySelectorAll('.panel').forEach(el => el.classList.remove('active'));
+  document.getElementById('panel-'+p).classList.add('active');
+  document.querySelectorAll('.nav-btn').forEach((b,i) => {
+    const labels = ['roll','inv','collect','craft','bank','settings'];
+    b.classList.toggle('active', labels[i]===p);
+  });
+  currentPanel = p;
+  renderAll();
+}
+let invTab = 'auras';
+function setInvTab(tab) {
+  invTab = tab;
+  document.getElementById('inv-auras').style.display = tab==='auras'?'block':'none';
+  document.getElementById('inv-potions').style.display = tab==='potions'?'block':'none';
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',['auras','potions'][i]===tab));
+  if (tab==='auras') renderInvAuras(); else renderInvPotions();
+}
+
+// ── TOAST ─────────────────────────────────────────────────────────────────────
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>el.classList.remove('show'), 2200);
+}
+
+// ── SAVE / LOAD ───────────────────────────────────────────────────────────────
+function saveGame() {
+  const data = {
+    rolls:S.rolls, coins:S.coins,
+    invAuras:S.invAuras, invPotions:S.invPotions,
+    crafted:S.crafted, glove:S.glove,
+    autoSpeed:S.autoSpeed, quickRoll:S.quickRoll,
+    settings: S.settings,
+    shopStock: S.shopStock,
+    shopNextRestock: S.shopNextRestock,
+  };
+  localStorage.setItem('beff_rng_v1', JSON.stringify(data));
+  toast('✓ Game saved!');
+  logPush('Game saved ✓', true);
+  renderAll();
+}
+function loadGame() {
+  try {
+    const raw = localStorage.getItem('beff_rng_v1') || localStorage.getItem('beff_rng_v3') || localStorage.getItem('sols_rng_v3');
+    if (!raw) return;
+    const d = JSON.parse(raw);
+    S.rolls = d.rolls||0; S.coins = d.coins||0;
+    S.invAuras = d.invAuras||{}; S.invPotions = d.invPotions||{};
+    S.crafted = d.crafted||[]; S.glove = d.glove||null;
+    S.autoSpeed = d.autoSpeed||0; S.quickRoll = d.quickRoll||false;
+    if (d.settings) {
+      // Merge saved settings, keeping defaults for any new keys
+      S.settings = Object.assign({}, S.settings, d.settings);
+      S.settings.logFilter = Object.assign({}, S.settings.logFilter, d.settings.logFilter||{});
+      S.settings.autoBuyTargets = Object.assign({}, S.settings.autoBuyTargets, d.settings.autoBuyTargets||{});
+    }
+    S.biome = null;
+    S.buff = null; S.speedBuff = null;
+    S.shopStock = d.shopStock || null;
+    S.shopNextRestock = d.shopNextRestock || null;
+    S.log = [{msg:'Game loaded', special:false}];
+    const qb = document.getElementById('quick-btn');
+    if (qb) { qb.textContent=`⚡ Quick: ${S.quickRoll?'ON':'OFF'}`; qb.classList.toggle('active',S.quickRoll); }
+    if (S.autoSpeed) startAutoRoll();
+  } catch(e) {}
+}
+
+// ── STARS ─────────────────────────────────────────────────────────────────────
+function buildStars() {
+  const c = document.getElementById('stars');
+  for (let i = 0; i < 120; i++) {
+    const s = document.createElement('div');
+    s.className = 'star';
+    const size = Math.random() < 0.8 ? 1 : Math.random() < 0.5 ? 2 : 3;
+    s.style.cssText = `
+      width:${size}px; height:${size}px;
+      left:${Math.random()*100}%; top:${Math.random()*100}%;
+      --d:${2+Math.random()*5}s; --o:${0.3+Math.random()*0.6};
+      animation-delay:${Math.random()*6}s;
+    `;
+    c.appendChild(s);
+  }
+}
+
+// ── KEYBOARD ──────────────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k === 'r' && currentPanel === 'roll') { e.preventDefault(); doRoll(); }
+  if (k === 'f') toggleQuick();
+  if (k === 's') saveGame();
+});
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+buildStars();
+loadGame();
+initShopStock();
+renderAll();
+</script>
+</body>
+</html>
